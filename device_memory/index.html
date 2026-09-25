@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>device memory</title>
+</head>
+<body>
+<script>
+  // Remembers the store's demo code in this browser, so reopening the shared
+  // LINE link continues where the store left off. Renders nothing.
+  const KEY = "menu-photo-pro-demo-code";
+
+  function send(type, data) {
+    window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*");
+  }
+
+  window.addEventListener("message", (event) => {
+    if (!event.data || event.data.type !== "streamlit:render") return;
+    const save = event.data.args.save;
+    try { if (save) localStorage.setItem(KEY, save); } catch (e) {}
+    let value = "";
+    try { value = localStorage.getItem(KEY) || ""; } catch (e) {}
+    send("streamlit:setComponentValue", { value: value, dataType: "json" });
+  });
+
+  send("streamlit:componentReady", { apiVersion: 1 });
+  send("streamlit:setFrameHeight", { height: 0 });
+</script>
+</body>
+</html>
