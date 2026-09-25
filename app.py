@@ -55,7 +55,6 @@ def edit_image(api_key, image_bytes, filename, style, model="gpt-image-2"):
         data={
             "model": model,
             "prompt": PROMPT + "\n\nSTYLE DIRECTION:\n" + style,
-            "input_fidelity": "high",
             "output_format": "png",
         },
         files={"image[]": (filename, image_bytes, mime)},
