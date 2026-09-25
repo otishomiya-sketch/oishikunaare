@@ -1,6 +1,8 @@
 import base64
 import io
+import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import requests
@@ -12,6 +14,10 @@ st.set_page_config(
     page_icon="🍽️",
     layout="wide",
 )
+
+# How many photos are sent to OpenAI at the same time.
+MAX_PARALLEL = 4
+MAX_RETRIES = 3
 
 PROMPT = """Edit the supplied food photo into a polished professional restaurant/menu photograph.
 
@@ -88,22 +94,29 @@ def normalize_image(image_bytes, max_edge=3840):
 def edit_image(api_key, image_bytes, filename, style, quality="high"):
     normalized_bytes = normalize_image(image_bytes)
 
-    response = requests.post(
-        "https://api.openai.com/v1/images/edits",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-        },
-        data={
-            "model": "gpt-image-2",
-            "prompt": PROMPT + "\n\nSTYLE DIRECTION:\n" + style,
-            "quality": quality,
-            "output_format": "png",
-        },
-        files={
-            "image[]": ("input.png", normalized_bytes, "image/png"),
-        },
-        timeout=300,
-    )
+    for attempt in range(MAX_RETRIES):
+        response = requests.post(
+            "https://api.openai.com/v1/images/edits",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+            },
+            data={
+                "model": "gpt-image-2",
+                "prompt": PROMPT + "\n\nSTYLE DIRECTION:\n" + style,
+                "quality": quality,
+                "output_format": "png",
+            },
+            files={
+                "image[]": ("input.png", normalized_bytes, "image/png"),
+            },
+            timeout=300,
+        )
+
+        # Rate limits are more likely when photos are sent in parallel.
+        retryable = response.status_code == 429 or response.status_code >= 500
+        if not retryable or attempt == MAX_RETRIES - 1:
+            break
+        time.sleep(5 * (attempt + 1))
 
     if not response.ok:
         try:
@@ -191,33 +204,44 @@ if uploads:
         type="primary",
         use_container_width=True,
     ):
-        results = []
+        results = [None] * len(uploads)
         progress = st.progress(0)
         status = st.empty()
+        status.write(f"0/{len(uploads)} 枚完了（最大{MAX_PARALLEL}枚ずつ同時に処理中…）")
 
-        for i, uploaded in enumerate(uploads):
-            status.write(f"{i + 1}/{len(uploads)} を処理中…")
-
-            try:
-                output = edit_image(
+        with ThreadPoolExecutor(
+            max_workers=min(MAX_PARALLEL, len(uploads))
+        ) as pool:
+            futures = {
+                pool.submit(
+                    edit_image,
                     api_key=api_key,
                     image_bytes=uploaded.getvalue(),
                     filename=uploaded.name,
                     style=style,
                     quality=quality,
-                )
+                ): i
+                for i, uploaded in enumerate(uploads)
+            }
 
-                output_name = (
-                    f"{i + 1:02d}_{Path(uploaded.name).stem}_menu.png"
-                )
-                results.append((output_name, output))
+            for done, future in enumerate(as_completed(futures), start=1):
+                i = futures[future]
+                uploaded = uploads[i]
 
-            except Exception as exc:
-                st.error(f"{uploaded.name}: {exc}")
+                try:
+                    output_name = (
+                        f"{i + 1:02d}_{Path(uploaded.name).stem}_menu.png"
+                    )
+                    results[i] = (output_name, future.result())
 
-            progress.progress((i + 1) / len(uploads))
+                except Exception as exc:
+                    st.error(f"{uploaded.name}: {exc}")
+
+                progress.progress(done / len(uploads))
+                status.write(f"{done}/{len(uploads)} 枚完了…")
 
         status.empty()
+        results = [result for result in results if result]
 
         if results:
             st.success(f"{len(results)}枚の処理が完了しました。")
