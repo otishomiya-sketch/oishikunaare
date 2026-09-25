@@ -56,8 +56,8 @@ def get_api_key():
         return None
 
 
-def normalize_image(image_bytes, max_edge=3840):
-    """Convert any accepted upload into a clean RGB PNG.
+def normalize_image(image_bytes, max_edge=2048):
+    """Convert any accepted upload into a clean RGB JPEG.
 
     This prevents CMYK, palette, grayscale, EXIF orientation, and other
     camera/phone-specific modes from causing image-edit upload errors.
@@ -72,7 +72,8 @@ def normalize_image(image_bytes, max_edge=3840):
             else:
                 image = image.copy()
 
-            # Avoid unnecessarily huge uploads while preserving aspect ratio.
+            # The model does not need more detail than this, and smaller
+            # uploads make each request noticeably faster.
             if max(image.size) > max_edge:
                 scale = max_edge / max(image.size)
                 new_size = (
@@ -82,7 +83,8 @@ def normalize_image(image_bytes, max_edge=3840):
                 image = image.resize(new_size, Image.Resampling.LANCZOS)
 
             output = io.BytesIO()
-            image.save(output, format="PNG", optimize=True)
+            # High-quality JPEG is far quicker to encode and upload than PNG.
+            image.save(output, format="JPEG", quality=95)
             return output.getvalue()
 
     except (UnidentifiedImageError, OSError, ValueError) as exc:
@@ -107,7 +109,7 @@ def edit_image(api_key, image_bytes, filename, style, quality="high"):
                 "output_format": "png",
             },
             files={
-                "image[]": ("input.png", normalized_bytes, "image/png"),
+                "image[]": ("input.jpg", normalized_bytes, "image/jpeg"),
             },
             timeout=300,
         )
