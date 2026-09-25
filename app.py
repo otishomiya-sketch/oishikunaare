@@ -103,10 +103,13 @@ def edit_image(api_key, image_bytes, filename, style, quality="high"):
                 "Authorization": f"Bearer {api_key}",
             },
             data={
-                "model": "gpt-image-2",
+                # Flare is the speed-focused GPT Image 2.5 model.
+                "model": "gpt-image-2.5-flare",
                 "prompt": PROMPT + "\n\nSTYLE DIRECTION:\n" + style,
                 "quality": quality,
-                "output_format": "png",
+                # JPEG output is faster than PNG according to OpenAI.
+                "output_format": "jpeg",
+                "output_compression": 95,
             },
             files={
                 "image[]": ("input.jpg", normalized_bytes, "image/jpeg"),
@@ -175,9 +178,9 @@ with st.sidebar:
 
     quality = st.selectbox(
         "仕上がり品質",
-        ["medium", "high"],
+        ["medium", "high", "xhigh", "max"],
         index=1,
-        help="high はより高品質ですが、medium よりAPI利用量が増える場合があります。",
+        help="medium → max の順に高品質になりますが、時間とAPI利用料金も増えます。",
     )
 
     st.divider()
@@ -232,7 +235,7 @@ if uploads:
 
                 try:
                     output_name = (
-                        f"{i + 1:02d}_{Path(uploaded.name).stem}_menu.png"
+                        f"{i + 1:02d}_{Path(uploaded.name).stem}_menu.jpg"
                     )
                     results[i] = (output_name, future.result())
 
@@ -262,7 +265,7 @@ if uploads:
                         "画像を保存",
                         data=data,
                         file_name=name,
-                        mime="image/png",
+                        mime="image/jpeg",
                         key=f"download_{i}",
                         use_container_width=True,
                         on_click="ignore",
