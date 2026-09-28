@@ -1,10 +1,12 @@
 import base64
 import html
 import io
+import re
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from urllib.parse import urlencode
 
 import requests
 import streamlit as st
@@ -332,6 +334,33 @@ st.markdown(
 APP_URL = "https://7ayyryczawpyuggappqsqqd.streamlit.app"
 CONTACT = "お問い合わせ：オーティス"
 
+
+def opened_in_line():
+    """LINE's in-app browser (User-Agent contains "Line/<version>")."""
+    try:
+        user_agent = st.context.headers.get("User-Agent", "")
+    except Exception:
+        return False
+    return bool(re.search(r"\bLine/\d", user_agent))
+
+
+# LINE's in-app browser often cannot pick photos or save files (especially on
+# Android). `openExternalBrowser=1` is LINE's own switch to open a link in the
+# phone's regular browser instead.
+if opened_in_line():
+    params = {k: v for k, v in st.query_params.items() if k != "openExternalBrowser"}
+    params["openExternalBrowser"] = "1"
+    st.warning(
+        "LINEの中で開いています。LINEの中では、写真の選択や保存がうまくいかないことがあります。"
+        "下のボタンから、Chromeなどのブラウザで開き直してください。"
+    )
+    st.link_button(
+        "ブラウザで開き直す",
+        f"{APP_URL}/?{urlencode(params)}",
+        type="primary",
+        width="stretch",
+    )
+
 remembered = _device_memory(save=st.session_state.get("save_code"), key="device_memory", default=None)
 code = (st.query_params.get("code") or "").strip()
 
@@ -612,10 +641,12 @@ if results:
                     st.markdown('<div class="mpp-label after">AFTER　仕上がり</div>', unsafe_allow_html=True)
                     st.image(r["after"], width="stretch")
 
-            with st.expander("iPhoneで「写真」アプリに保存するには"):
+            with st.expander("スマホの「写真」アプリに保存するには"):
                 st.markdown(
-                    '<div class="mpp-note">下の画像を長押しして「"写真"に保存」を選んでください。'
-                    "Androidは画像を長押しして「画像をダウンロード」でも保存できます。</div>",
+                    '<div class="mpp-note"><b>iPhone</b>：下の画像を長押しして「"写真"に保存」を選んでください。<br>'
+                    "<b>Android</b>：下の「この写真を保存」を押すと「ダウンロード」に保存され、"
+                    "Googleフォトの「ライブラリ」→「Download」から見られます。"
+                    "下の画像を長押しして「画像をダウンロード」でも保存できます。</div>",
                     unsafe_allow_html=True,
                 )
                 st.image(r["full"], width="stretch")
