@@ -3,7 +3,6 @@ import html
 import io
 import re
 import time
-import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlencode
@@ -291,6 +290,24 @@ _device_memory = components.declare_component(
     "device_memory",
     path=str(Path(__file__).parent / "device_memory"),
 )
+
+
+# Save button that puts photos in the phone's photo library (share sheet on
+# iPhone, download on Android).
+_save_photos = components.declare_component(
+    "save_photos",
+    path=str(Path(__file__).parent / "save_photos"),
+)
+
+
+def save_button(photos, label, key, secondary=False):
+    _save_photos(
+        files=[{"name": name, "data": base64.b64encode(data).decode()} for name, data in photos],
+        label=label,
+        secondary=secondary,
+        key=key,
+        default=None,
+    )
 
 
 def compare_slider(before, after, width, height, key):
@@ -638,18 +655,11 @@ if results:
         ) or VIEW_SLIDER
 
     if len(results) > 1:
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-            for r in results:
-                archive.writestr(r["name"], r["full"])
-
-        st.download_button(
-            f"全{len(results)}枚をZIPでまとめて保存",
-            data=zip_buffer.getvalue(),
-            file_name="menu-photo-pro.zip",
-            mime="application/zip",
-            width="stretch",
-            on_click="ignore",
+        save_button(
+            [(r["name"], r["full"]) for r in results],
+            f"全{len(results)}枚を写真に保存",
+            key="save_all",
+            secondary=True,
         )
 
     for i, r in enumerate(results):
@@ -667,26 +677,15 @@ if results:
                     st.markdown('<div class="mpp-label after">AFTER　仕上がり</div>', unsafe_allow_html=True)
                     st.image(r["after"], width="stretch")
 
-            with st.expander("スマホの「写真」アプリに保存するには"):
+            save_button([(r["name"], r["full"])], "この写真を保存", key=f"save_{i}")
+
+            with st.expander("うまく保存できないときは"):
                 st.markdown(
-                    '<div class="mpp-note"><b>iPhone</b>：下の画像を長押しして「"写真"に保存」を選んでください。<br>'
-                    "<b>Android</b>：下の「この写真を保存」を押すと「ダウンロード」に保存され、"
-                    "Googleフォトの「ライブラリ」→「Download」から見られます。"
-                    "下の画像を長押しして「画像をダウンロード」でも保存できます。</div>",
+                    '<div class="mpp-note">下の画像を長押しして、'
+                    "iPhoneは「\"写真\"に保存」、Androidは「画像をダウンロード」を選んでください。</div>",
                     unsafe_allow_html=True,
                 )
                 st.image(r["full"], width="stretch")
-
-            st.download_button(
-                "この写真を保存",
-                data=r["full"],
-                file_name=r["name"],
-                mime="image/jpeg",
-                key=f"download_{i}",
-                type="primary",
-                width="stretch",
-                on_click="ignore",
-            )
 
     if st.button("別の写真を仕上げる", width="stretch", key="restart"):
         st.session_state.pop("results", None)

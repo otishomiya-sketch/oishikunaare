@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>写真に保存</title>
+<style>
+  html, body { margin: 0; background: transparent; font-family: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif; }
+  .wrap { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 4px; }
+  button {
+    width: 100%; min-height: 48px; border: 0; border-radius: 999px; cursor: pointer;
+    font-family: inherit; font-weight: 700; font-size: 16px; line-height: 1.2; letter-spacing: .04em;
+    background: #B7412A; color: #fff;
+  }
+  button.secondary { background: #fff; color: #2A211C; border: 1.5px solid #D9CCB6; }
+  button:focus-visible { outline: 3px solid #E8B64C; outline-offset: 2px; }
+  button:active { transform: scale(.99); }
+  .note { font-size: 12px; line-height: 1.6; color: #6A5D53; text-align: center; min-height: 1em; }
+  .note.done { color: #2F6B3A; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+  <button id="save" type="button">写真に保存</button>
+  <div class="note" id="note"></div>
+</div>
+<script>
+  // Saves finished photos where each phone keeps its pictures:
+  //   iPhone/iPad: the share sheet, whose "画像を保存" puts them in the Photos app.
+  //   Android and others: a download, which Google Photos / Gallery show under "Download".
+  const button = document.getElementById("save");
+  const note = document.getElementById("note");
+  const ua = navigator.userAgent;
+  const isAndroid = /Android/.test(ua);
+  // iPadOS reports itself as a Mac with touch, so check that too.
+  const isIOS = !isAndroid && (/iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+  let files = [];
+
+  function send(type, data) {
+    window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*");
+  }
+  function fit() {
+    send("streamlit:setFrameHeight", { height: Math.ceil(document.getElementById("wrap").getBoundingClientRect().height) + 2 });
+  }
+  function say(text, done) {
+    note.textContent = text;
+    note.className = done ? "note done" : "note";
+    fit();
+  }
+  function toFile(item) {
+    const bytes = atob(item.data);
+    const buffer = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
+    return new File([buffer], item.name, { type: "image/jpeg" });
+  }
+
+  function download() {
+    files.forEach((file, i) => {
+      setTimeout(() => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(file);
+        a.download = file.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      }, i * 500);
+    });
+    if (isAndroid) {
+      say("保存しました。Googleフォトの「ライブラリ」やギャラリーの「Download」から見られます。", true);
+    } else {
+      say("保存しました。「ダウンロード」フォルダをご確認ください。", true);
+    }
+  }
+
+  button.addEventListener("click", async () => {
+    // Files are prepared at render time so the share call keeps the tap's user activation.
+    if (isIOS && navigator.canShare && navigator.canShare({ files: files })) {
+      try {
+        await navigator.share({ files: files });
+        say("「画像を保存」を選んでいれば、写真アプリに保存されています。", true);
+      } catch (e) {
+        if (e && e.name === "AbortError") return;
+        download();
+      }
+      return;
+    }
+    download();
+  });
+
+  window.addEventListener("message", (event) => {
+    if (!event.data || event.data.type !== "streamlit:render") return;
+    const args = event.data.args;
+    files = (args.files || []).map(toFile);
+    button.textContent = args.label || "写真に保存";
+    button.className = args.secondary ? "secondary" : "";
+    if (!note.classList.contains("done")) {
+      say(isIOS ? "押したあと、メニューの「画像を保存」を選ぶと写真アプリに入ります。" : "");
+    }
+    fit();
+  });
+
+  new ResizeObserver(fit).observe(document.getElementById("wrap"));
+  send("streamlit:componentReady", { apiVersion: 1 });
+</script>
+</body>
+</html>
