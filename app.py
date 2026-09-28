@@ -13,6 +13,14 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+try:
+    # iPhone photos may arrive as HEIC.
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+except ImportError:
+    pass
+
 import demo_quota
 
 st.set_page_config(
@@ -95,7 +103,7 @@ def normalize_image(image_bytes, max_edge=2048):
 
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise RuntimeError(
-            "画像を読み込めませんでした。JPG / JPEG / PNG / WebP の画像を選択してください。"
+            "画像を読み込めませんでした。JPG・PNG・WebP・HEIC の写真を選んでください。"
         ) from exc
 
 
@@ -198,7 +206,7 @@ div[data-testid="stFileUploaderDropzoneInstructions"] > div::before {
     content: "タップして写真を選ぶ"; display: block; font-weight: 900; font-size: 17px; color: #2A211C;
 }
 div[data-testid="stFileUploaderDropzoneInstructions"] > div::after {
-    content: "複数枚まとめて選べます（JPG・PNG・WebP）"; display: block; font-size: 13px; color: #6A5D53;
+    content: "複数枚まとめて選べます（JPG・PNG・WebP・HEIC）"; display: block; font-size: 13px; color: #6A5D53;
 }
 /* The button stays (it opens the photo picker) but reads in Japanese. */
 [data-testid="stFileUploaderDropzone"] button { font-size: 0; min-height: 44px; border-radius: 999px; padding: 0 20px; background: #2A211C; border-color: #2A211C; }
@@ -476,13 +484,31 @@ upload_key = f"uploads_{st.session_state.get('batch', 0)}"
 step_bar(3 if results else (2 if st.session_state.get(upload_key) else 1))
 
 # Once photos are finished, show only the results so nothing is re-run by accident.
+# No `type` filter: an extension list stops Android from opening the photo
+# gallery (device_memory/index.html sets accept="image/*" instead), and gallery
+# files do not always have an extension. Files are checked by opening them.
 uploads = None if results else st.file_uploader(
     "料理写真",
-    type=["png", "jpg", "jpeg", "webp"],
+    type=None,
     accept_multiple_files=True,
     label_visibility="collapsed",
     key=upload_key,
 )
+
+if uploads:
+    previews = []
+    unreadable = []
+    for u in uploads:
+        try:
+            previews.append((u, thumbnail(u.getvalue())))
+        except Exception:
+            unreadable.append(u.name)
+    if unreadable:
+        st.warning(
+            "写真として読み込めないファイルがありました（" + "、".join(unreadable) + "）。"
+            "JPG・PNG・WebP・HEICの写真を選んでください。"
+        )
+    uploads = [u for u, _ in previews]
 
 if uploads:
     st.markdown(
@@ -491,8 +517,8 @@ if uploads:
     )
 
     thumbs = "".join(
-        f'<img src="data:image/jpeg;base64,{base64.b64encode(thumbnail(u.getvalue())).decode()}" alt="{u.name}">'
-        for u in uploads
+        f'<img src="data:image/jpeg;base64,{base64.b64encode(thumb).decode()}" alt="{html.escape(u.name)}">'
+        for u, thumb in previews
     )
     st.markdown(f'<div class="mpp-thumbs">{thumbs}</div>', unsafe_allow_html=True)
 

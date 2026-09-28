@@ -7,7 +7,8 @@
 <body>
 <script>
   // Remembers the store's demo code in this browser, so reopening the shared
-  // LINE link continues where the store left off. Renders nothing.
+  // LINE link continues where the store left off, and makes the photo picker
+  // ask for images. Renders nothing.
   const KEY = "menu-photo-pro-demo-code";
 
   function send(type, data) {
@@ -22,6 +23,23 @@
     try { value = localStorage.getItem(KEY) || ""; } catch (e) {}
     send("streamlit:setComponentValue", { value: value, dataType: "json" });
   });
+
+  // Ask for photos by type so Android opens its photo gallery instead of a
+  // file browser. Streamlit re-renders the uploader, so keep re-applying it.
+  // (This frame is same-origin with the app, so it can reach its page.)
+  function acceptImages() {
+    try {
+      window.parent.document.querySelectorAll('input[type="file"]').forEach((input) => {
+        if (input.getAttribute("accept") !== "image/*") input.setAttribute("accept", "image/*");
+      });
+    } catch (e) {}
+  }
+  try {
+    new MutationObserver(acceptImages).observe(window.parent.document.body, {
+      subtree: true, childList: true, attributes: true, attributeFilter: ["accept"],
+    });
+  } catch (e) {}
+  acceptImages();
 
   send("streamlit:componentReady", { apiVersion: 1 });
   send("streamlit:setFrameHeight", { height: 0 });
