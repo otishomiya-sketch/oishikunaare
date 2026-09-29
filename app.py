@@ -236,6 +236,11 @@ div[data-testid="stFileUploaderDropzoneInstructions"] > div::after {
     background: linear-gradient(rgba(251, 246, 236, 0), #FBF6EC 30%);
 }
 .mpp-note { font-size: 13px; color: #6A5D53; line-height: 1.6; }
+.mpp-upsell { background: #2A211C; color: #FBF6EC; border-radius: 16px; padding: 20px; margin: 18px 0 10px; display: flex; flex-direction: column; gap: 6px; scroll-margin-top: 16px; }
+.mpp-upsell strong { font-family: "Dela Gothic One", sans-serif; font-weight: 400; font-size: 21px; line-height: 1.35; }
+.mpp-upsell p { margin: 0; font-size: 14px; line-height: 1.7; color: #E9DFCF; }
+.mpp-banner { background: #F3E7CF; border-radius: 12px; padding: 12px 14px; margin: 6px 0; font-size: 14px; line-height: 1.7; color: #2A211C; }
+.mpp-banner a { color: #9E3522; font-weight: 700; margin-left: 4px; }
 .mpp-plan { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .mpp-plan b { font-family: "Dela Gothic One", sans-serif; font-weight: 400; font-size: 20px; margin-right: 10px; }
 .mpp-plan span { font-size: 15px; font-weight: 700; color: #4A3F37; }
@@ -590,6 +595,30 @@ def plan_panel(current=None):
         st.markdown(f'<div class="mpp-note"><a href="{html.escape(legal_url)}" target="_blank">利用規約・特定商取引法に基づく表記</a></div>', unsafe_allow_html=True)
 
 
+def plan_buttons(prefix):
+    """One button per plan; each goes straight to Stripe Checkout."""
+    for i, p in enumerate(billing.PLANS):
+        label = f"{p['name']}　月{p['quota']}枚　月額{p['price']:,}円（税込{billing.price_with_tax(p):,}円）"
+        if st.button(label, key=f"{prefix}_{p['key']}", width="stretch", type="primary" if i == 0 else "secondary"):
+            try:
+                _, url = billing.create_checkout(code, p, APP_URL)
+            except billing.BillingError as exc:
+                st.error(f"{exc} 時間をおいてもう一度お試しください。")
+            else:
+                go_to(url, f"{p['name']}プランのお支払い画面")
+
+
+def upsell_card(prefix, title, body, anchor=""):
+    """A call to keep using the app on a paid plan (demo stores only)."""
+    anchor_attr = f' id="{anchor}"' if anchor else ""
+    st.markdown(
+        f'<div class="mpp-upsell"{anchor_attr}><strong>{title}</strong><p>{body}</p></div>',
+        unsafe_allow_html=True,
+    )
+    plan_buttons(prefix)
+    st.caption("カード情報はStripeの安全な画面で入力します。使い切れなかった枚数は翌月に繰り越せます。いつでも解約できます。")
+
+
 def manage_button():
     if st.button("プランの変更・解約・カードの変更", key="portal", width="stretch", type="primary"):
         try:
@@ -658,6 +687,24 @@ show_flash()
 if billing.enabled() and remaining > 0:
     with st.expander("プランの変更・解約" if plan else f"有料プランを見る（月額{billing.PLANS[0]['price']:,}円〜）"):
         plan_panel(current=plan)
+
+# Demo stores: nudge toward a plan while they are still using the app.
+upsell = billing.enabled() and not plan
+if upsell and 0 < remaining <= 3 and not st.session_state.get("results"):
+    # Kept small so the photo picker stays on the first screen of a phone.
+    light = billing.PLANS[0]
+    st.markdown(
+        f'<div class="mpp-banner">無料デモは残り{remaining}枚です。続けて使うなら、'
+        f'{light["name"]}プラン（月{light["quota"]}枚・月額{light["price"]:,}円）がおすすめです。</div>',
+        unsafe_allow_html=True,
+    )
+    if st.button(f"{light['name']}プランで続ける", key="upsell_low_light"):
+        try:
+            _, url = billing.create_checkout(code, light, APP_URL)
+        except billing.BillingError as exc:
+            st.error(f"{exc} 時間をおいてもう一度お試しください。")
+        else:
+            go_to(url, f"{light['name']}プランのお支払い画面")
 
 results = st.session_state.get("results", [])
 
@@ -846,6 +893,13 @@ if results:
         f'<div class="mpp-section">仕上がり　{len(results)}枚</div>',
         unsafe_allow_html=True,
     )
+    if upsell:
+        left = f"無料デモはあと{remaining}枚です。" if remaining else "無料デモはこれで最後です。"
+        st.markdown(
+            f'<div class="mpp-banner">仕上がりはいかがですか？ {left}'
+            '<a href="#mpp-plans">毎月使うなら有料プランへ（月額1,980円〜）</a></div>',
+            unsafe_allow_html=True,
+        )
     # On its own row so the labels never get cut off next to the heading.
     view = st.segmented_control(
         "表示",
@@ -926,5 +980,14 @@ if results:
                     unsafe_allow_html=True,
                 )
                 st.image(r["full"], width="stretch")
+
+    if upsell:
+        upsell_card(
+            "upsell_results",
+            "この仕上がりを、毎月のメニューに。",
+            "新メニューや季節の料理が出るたびに、プロ品質の写真に。有料プランなら毎月10枚から使えて、"
+            "使い切れなかった分は翌月に繰り越せます。",
+            anchor="mpp-plans",
+        )
 
     st.button("最初に戻る（別の写真を仕上げる）", width="stretch", key="restart", on_click=start_over)
