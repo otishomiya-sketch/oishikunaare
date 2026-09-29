@@ -71,7 +71,7 @@ def get_api_key():
         return None
 
 
-def normalize_image(image_bytes, max_edge=2048):
+def normalize_image(image_bytes, max_edge=1536):
     """Convert any accepted upload into a clean RGB JPEG.
 
     This prevents CMYK, palette, grayscale, EXIF orientation, and other
@@ -87,8 +87,8 @@ def normalize_image(image_bytes, max_edge=2048):
             else:
                 image = image.copy()
 
-            # The model does not need more detail than this, and smaller
-            # uploads make each request noticeably faster.
+            # Matches the largest output size we ask for; smaller uploads
+            # make each request faster and cost fewer input tokens.
             if max(image.size) > max_edge:
                 scale = max_edge / max(image.size)
                 new_size = (
@@ -108,8 +108,30 @@ def normalize_image(image_bytes, max_edge=2048):
         ) from exc
 
 
+# About 1.77 megapixels (1536x1152): plenty for menus and SNS, and the same
+# work for the model whichever way the photo is oriented.
+OUTPUT_PIXELS = 1536 * 1152
+
+
+def output_size(jpeg_bytes):
+    """The photo's own aspect ratio at a fixed, menu/SNS-sized pixel count.
+
+    With size "auto" the model may render far larger images than needed,
+    which is slower and costs more. Custom sizes must be multiples of 16
+    with an aspect ratio between 1:3 and 3:1.
+    """
+    with Image.open(io.BytesIO(jpeg_bytes)) as image:
+        width, height = image.size
+    ratio = min(3.0, max(1 / 3, width / height))
+    w = (OUTPUT_PIXELS * ratio) ** 0.5
+    h = (OUTPUT_PIXELS / ratio) ** 0.5
+    return f"{int(round(w / 16)) * 16}x{int(round(h / 16)) * 16}"
+
+
 def edit_image(api_key, image_bytes, filename, style, quality="high"):
     normalized_bytes = normalize_image(image_bytes)
+    size = output_size(normalized_bytes)
+    started = time.monotonic()
 
     for attempt in range(MAX_RETRIES):
         response = requests.post(
@@ -122,6 +144,7 @@ def edit_image(api_key, image_bytes, filename, style, quality="high"):
                 "model": "gpt-image-2.5-flare",
                 "prompt": PROMPT + "\n\nSTYLE DIRECTION:\n" + style,
                 "quality": quality,
+                "size": size,
                 # JPEG output is faster than PNG according to OpenAI.
                 "output_format": "jpeg",
                 "output_compression": 95,
@@ -131,6 +154,12 @@ def edit_image(api_key, image_bytes, filename, style, quality="high"):
             },
             timeout=300,
         )
+
+        # If the model rejects our custom size, fall back to its own choice.
+        if response.status_code == 400 and size != "auto" and "size" in response.text.lower():
+            print(f"[edit] size {size} rejected, retrying with auto", flush=True)
+            size = "auto"
+            continue
 
         # Rate limits are more likely when photos are sent in parallel.
         retryable = response.status_code == 429 or response.status_code >= 500
@@ -153,9 +182,18 @@ def edit_image(api_key, image_bytes, filename, style, quality="high"):
         )
 
     try:
-        data = response.json()["data"][0]
+        body = response.json()
+        data = body["data"][0]
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise RuntimeError("OpenAIから画像データを取得できませんでした。") from exc
+
+    # Timing and token use for tuning speed and cost ("Manage app" logs only).
+    usage = body.get("usage") or {}
+    print(
+        f"[edit] size={size} quality={quality} seconds={time.monotonic() - started:.1f} "
+        f"input_tokens={usage.get('input_tokens')} output_tokens={usage.get('output_tokens')}",
+        flush=True,
+    )
 
     if data.get("b64_json"):
         return base64.b64decode(data["b64_json"])
@@ -282,6 +320,14 @@ div[data-testid="stFileUploaderDropzoneInstructions"] > div::after {
 .stButton > button[kind="primary"] { font-size: 17px; min-height: 52px; letter-spacing: 0.04em; }
 </style>
 """
+
+# OpenAI quality levels, labelled for store owners.
+QUALITY_LABELS = {
+    "medium": "速い",
+    "high": "標準",
+    "xhigh": "高品質",
+    "max": "最高品質",
+}
 
 VIEW_SLIDER = "スライダーで比較"
 # label -> (style, description)
@@ -798,9 +844,10 @@ if uploads:
         )
         quality = st.segmented_control(
             "仕上がり品質",
-            ["medium", "high", "xhigh", "max"],
+            list(QUALITY_LABELS),
             default="high",
-            help="medium → max の順に高品質になりますが、時間とAPI利用料金も増えます。",
+            format_func=QUALITY_LABELS.get,
+            help="右ほど細部まできれいに仕上がりますが、時間がかかります。",
         ) or "high"
 
     if st.button(
