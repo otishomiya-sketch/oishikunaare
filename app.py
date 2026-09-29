@@ -20,6 +20,7 @@ try:
 except ImportError:
     pass
 
+import billing
 import demo_quota
 from before_after_video import make_image_video, make_video
 
@@ -208,9 +209,21 @@ div[data-testid="stFileUploaderDropzoneInstructions"] > div::before {
 div[data-testid="stFileUploaderDropzoneInstructions"] > div::after {
     content: "複数枚まとめて選べます（JPG・PNG・WebP・HEIC）"; display: block; font-size: 13px; color: #6A5D53;
 }
-/* The button stays (it opens the photo picker) but reads in Japanese. */
-[data-testid="stFileUploaderDropzone"] button { font-size: 0; min-height: 44px; border-radius: 999px; padding: 0 20px; background: #2A211C; border-color: #2A211C; }
-[data-testid="stFileUploaderDropzone"] button::after { content: "写真を選ぶ"; font-size: 15px; font-weight: 700; color: #FFFFFF; }
+/* Replace the button's own icon and "Upload"/"Browse files" text (which keeps its
+   width even when hidden) with a centred photo icon and Japanese label. */
+[data-testid="stFileUploaderDropzone"] button {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 48px; border-radius: 999px; padding: 0 24px;
+    background: #2A211C; border-color: #2A211C; color: #FFFFFF;
+    font-size: 0 !important;  /* older Streamlit puts "Browse files" as bare text */
+}
+[data-testid="stFileUploaderDropzone"] button > * { display: none !important; }
+[data-testid="stFileUploaderDropzone"] button::before {
+    content: ""; width: 20px; height: 20px; flex-shrink: 0; background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Ccircle cx='9' cy='10' r='1.6'/%3E%3Cpath d='M21 16l-5-5-8 8'/%3E%3C/svg%3E") center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Ccircle cx='9' cy='10' r='1.6'/%3E%3Cpath d='M21 16l-5-5-8 8'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+[data-testid="stFileUploaderDropzone"] button::after { content: "写真を選ぶ"; font-size: 16px; font-weight: 700; line-height: 1; color: #FFFFFF; }
 @media (max-width: 640px) { [data-testid="stFileUploaderDropzone"] button { width: 100%; } }
 
 /* Keep the main action within thumb reach while scrolling. */
@@ -223,8 +236,15 @@ div[data-testid="stFileUploaderDropzoneInstructions"] > div::after {
     background: linear-gradient(rgba(251, 246, 236, 0), #FBF6EC 30%);
 }
 .mpp-note { font-size: 13px; color: #6A5D53; line-height: 1.6; }
-.mpp-quota { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #FFFFFF; border: 1.5px solid #2A211C; border-radius: 12px; padding: 10px 14px; margin: 4px 0; font-size: 14px; }
-.mpp-quota b { font-size: 15px; white-space: nowrap; }
+.mpp-plan { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mpp-plan b { font-family: "Dela Gothic One", sans-serif; font-weight: 400; font-size: 20px; margin-right: 10px; }
+.mpp-plan span { font-size: 15px; font-weight: 700; color: #4A3F37; }
+.mpp-price { font-size: 18px; font-weight: 900; color: #B7412A; }
+.mpp-price small { font-size: 12px; font-weight: 500; color: #6A5D53; margin-left: 4px; }
+.mpp-quota { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 12px; background: #FFFFFF; border: 1.5px solid #2A211C; border-radius: 12px; padding: 10px 14px; margin: 4px 0; font-size: 14px; }
+.mpp-quota > div { flex: 1 1 8em; min-width: 0; }
+.mpp-quota b { font-size: 15px; text-align: right; margin-left: auto; }
+.mpp-quota b small { display: block; font-size: 12px; font-weight: 500; color: #6A5D53; }
 .mpp-quota b span { font-family: "Dela Gothic One", sans-serif; font-weight: 400; font-size: 20px; color: #B7412A; }
 .mpp-done { background: #2A211C; color: #FBF6EC; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
 .mpp-done strong { font-family: "Dela Gothic One", sans-serif; font-weight: 400; font-size: 20px; }
@@ -249,7 +269,10 @@ div[data-testid="stFileUploaderDropzoneInstructions"] > div::after {
 .mpp-label.after { color: #B7412A; }
 .mpp-name { font-weight: 700; font-size: 15px; }
 
-[data-testid="stFileUploaderDropzone"] { background: #FFFFFF; border: 2px dashed #CDBBA0; border-radius: 14px; padding: 22px 18px; flex-wrap: wrap; gap: 12px; }
+[data-testid="stFileUploaderDropzone"] { background: #FFFFFF; border: 2px dashed #CDBBA0; border-radius: 14px; padding: 22px 18px; display: flex; flex-direction: column; align-items: stretch; gap: 14px; }
+/* Explanation first, then the button, whichever order Streamlit renders them in. */
+[data-testid="stFileUploaderDropzoneInstructions"] { order: -1; margin: 0; }
+[data-testid="stFileUploaderDropzone"] > span { display: flex; justify-content: center; }
 .stButton > button, .stDownloadButton > button { border-radius: 999px; font-weight: 700; min-height: 44px; }
 .stButton > button[kind="primary"] { font-size: 17px; min-height: 52px; letter-spacing: 0.04em; }
 </style>
@@ -328,6 +351,14 @@ def compare_slider(before, after, width, height, key):
     )
 
 
+def start_over():
+    """Clear the finished photos and empty the uploader."""
+    st.session_state.pop("flash", None)
+    st.session_state.pop("results", None)
+    st.session_state.pop("errors", None)
+    st.session_state["batch"] = st.session_state.get("batch", 0) + 1
+
+
 def step_bar(current):
     steps = ["写真を選ぶ", "仕上げる", "保存する"]
     items = []
@@ -404,6 +435,13 @@ if not code:
     code = remembered
 
 
+def show_flash():
+    # Kept until the next photo run or restart: helper components rerun the
+    # page right after load, which would otherwise wipe the message at once.
+    if "flash" in st.session_state:
+        st.success(st.session_state["flash"])
+
+
 def finished_screen(title, body):
     st.markdown(
         f'<div class="mpp-done"><strong>{title}</strong><p>{body}</p></div>',
@@ -414,14 +452,17 @@ def finished_screen(title, body):
 
 def start_screen(message=None):
     try:
-        if demo_quota.total_remaining() == 0:
-            finished_screen(
-                "デモの受付を終了しました",
-                "たくさんのご利用ありがとうございました。本導入のご相談は、オーティスまでお気軽にご連絡ください。",
-            )
+        demo_closed = demo_quota.total_remaining() == 0
     except demo_quota.QuotaError as exc:
         st.error(f"{exc} 時間をおいて開き直してください。")
         st.stop()
+    if demo_closed and not billing.enabled():
+        finished_screen(
+            "デモの受付を終了しました",
+            "たくさんのご利用ありがとうございました。本導入のご相談は、オーティスまでお気軽にご連絡ください。",
+        )
+    if demo_closed:
+        st.info("無料デモの受付は終了しました。お店の名前を登録すると、有料プランでご利用いただけます。")
 
     if message:
         st.info(message)
@@ -477,13 +518,127 @@ if remembered != code:
 if st.query_params.get("code") != code:
     st.query_params["code"] = code
 
-remaining = account["remaining"]
+# ---- Paid plans (Stripe) ----
+
+
+def plan_panel(current=None):
+    """The three monthly plans with a sign-up button each (or a manage button if subscribed)."""
+    st.markdown('<div class="mpp-section">料金プラン</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="mpp-note">毎月1日にプランの枚数が追加され、使い切れなかった分は翌月に繰り越されます。'
+        "いつでもプランの変更・解約ができます（解約すると繰越分はなくなります）。</div>",
+        unsafe_allow_html=True,
+    )
+    for p in billing.PLANS:
+        with st.container(border=True):
+            st.markdown(
+                f'<div class="mpp-plan"><div><b>{p["name"]}</b><span>月{p["quota"]}枚まで</span></div>'
+                f'<div class="mpp-price">月額{p["price"]:,}円<small>（税込{billing.price_with_tax(p):,}円）</small></div></div>',
+                unsafe_allow_html=True,
+            )
+            if current:
+                if current["key"] == p["key"]:
+                    st.markdown('<div class="mpp-note">ご利用中のプランです</div>', unsafe_allow_html=True)
+            elif st.button("このプランで申し込む", key=f"plan_{p['key']}", width="stretch", type="primary"):
+                try:
+                    _, url = billing.create_checkout(code, p, APP_URL)
+                    st.session_state["checkout"] = (p["name"], url)
+                except billing.BillingError as exc:
+                    st.error(f"{exc} 時間をおいてもう一度お試しください。")
+
+    if st.session_state.get("checkout") and not current:
+        name, url = st.session_state["checkout"]
+        st.link_button(f"{name}プランのお支払い画面へ進む（Stripe）", url, type="primary", width="stretch")
+        st.caption("カード情報はStripeの安全な画面で入力します。お支払いが終わると、自動でこの画面に戻ります。")
+
+    if current:
+        manage_button()
+    else:
+        with st.expander("お支払い済みなのに反映されない方"):
+            if st.button("契約を確認する", key="find_subscription", width="stretch"):
+                try:
+                    found = billing.find_subscription(code)
+                except billing.BillingError as exc:
+                    found = None
+                    st.error(str(exc))
+                if found:
+                    sub_id, customer_id = found
+                    info = billing.subscription_plan(sub_id)
+                    demo_quota.link_subscription(code, sub_id, customer_id, info["plan"]["name"] if info["plan"] else "")
+                    st.session_state["flash"] = "ご契約を確認しました。有料プランをご利用いただけます。"
+                    st.rerun()
+                else:
+                    st.info("このお店のご契約が見つかりませんでした。オーティスまでお問い合わせください。")
+
+    legal_url = str(st.secrets.get("TERMS_URL", "")).strip()
+    if legal_url:
+        st.markdown(f'<div class="mpp-note"><a href="{html.escape(legal_url)}" target="_blank">利用規約・特定商取引法に基づく表記</a></div>', unsafe_allow_html=True)
+
+
+def manage_button():
+    if st.button("プランの変更・解約・カードの変更", key="portal", width="stretch"):
+        try:
+            st.session_state["portal_url"] = billing.portal_url(account["customer_id"], code, APP_URL)
+        except billing.BillingError as exc:
+            st.error(f"{exc} 時間をおいてもう一度お試しください。")
+    if st.session_state.get("portal_url"):
+        st.link_button("手続きの画面へ進む（Stripe）", st.session_state["portal_url"], width="stretch")
+
+
+plan = None
+if billing.enabled():
+    # Coming back from Stripe Checkout with ?session_id=...
+    session_id = st.query_params.get("session_id")
+    if session_id:
+        try:
+            done = billing.completed_checkout(session_id, code)
+            if done:
+                sub_id, customer_id = done
+                info = billing.subscription_plan(sub_id)
+                demo_quota.link_subscription(code, sub_id, customer_id, info["plan"]["name"] if info["plan"] else "")
+                st.session_state["flash"] = "お申し込みありがとうございます。有料プランが始まりました。"
+                st.session_state.pop("checkout", None)
+                account = demo_quota.get_account(code)
+        except (billing.BillingError, demo_quota.QuotaError) as exc:
+            st.error(f"お申し込みの確認に失敗しました。{exc}")
+        del st.query_params["session_id"]
+
+    # Coming back from the Customer Portal: plan may have changed.
+    if st.query_params.get("portal"):
+        billing.subscription_plan.clear()
+        st.session_state.pop("portal_url", None)
+        del st.query_params["portal"]
+
+    if account["subscription_id"]:
+        try:
+            info = billing.subscription_plan(account["subscription_id"])
+            plan = info["plan"]
+            label = plan["name"] if plan else f"停止中（{info['status']}）"
+            if label != account["plan_label"]:
+                demo_quota.set_plan_label(code, label)
+        except billing.BillingError:
+            # Stripe unreachable: trust the last known plan rather than locking a paying store out.
+            plan = next((p for p in billing.PLANS if p["name"] == account["plan_label"]), None)
+
+if plan:
+    balance = demo_quota.paid_balance(account, plan["quota"])
+    remaining = balance["remaining"]
+    detail = f'今月分{plan["quota"]}＋繰越{balance["carry"]}' if balance["carry"] else f'今月分{plan["quota"]}'
+    quota_text = f'{plan["name"]}プラン　今月の残り <span>{remaining}</span>枚<small>（{detail}）</small>'
+else:
+    remaining = account["remaining"]
+    quota_text = f'デモ残り <span>{remaining}</span> / {account["limit"]}枚'
+
 store_name = html.escape(account["store"] or "デモ")
 st.markdown(
-    f'<div class="mpp-quota"><div>{store_name} さま</div>'
-    f'<b>デモ残り <span>{remaining}</span> / {account["limit"]}枚</b></div>',
+    f'<div class="mpp-quota"><div>{store_name} さま</div><b>{quota_text}</b></div>',
     unsafe_allow_html=True,
 )
+show_flash()
+
+if billing.enabled() and remaining > 0:
+    with st.expander("プランの変更・解約" if plan else f"有料プランを見る（月額{billing.PLANS[0]['price']:,}円〜）"):
+        plan_panel(current=plan)
 
 results = st.session_state.get("results", [])
 
@@ -491,16 +646,30 @@ for message in st.session_state.get("errors", []):
     st.error(message)
 
 if remaining == 0 and not results:
-    if account["total_exhausted"]:
-        finished_screen(
-            "デモの受付を終了しました",
-            "たくさんのご利用ありがとうございました。本導入のご相談は、オーティスまでお気軽にご連絡ください。",
+    if plan:
+        st.markdown(
+            '<div class="mpp-done"><strong>今月の枚数を使い切りました</strong>'
+            f'<p>{plan["name"]}プラン（月{plan["quota"]}枚）の今月分と繰越分をご利用いただきました。'
+            f'来月1日に{plan["quota"]}枚が追加されます。上のプランに変更すると、今月もすぐにご利用いただけます。</p></div>',
+            unsafe_allow_html=True,
         )
-    finished_screen(
-        "デモ枠を使い切りました",
-        f'{account["limit"]}枚分のデモをご利用いただき、ありがとうございました。'
-        "本導入のご相談は、オーティスまでお気軽にご連絡ください。",
-    )
+        plan_panel(current=plan)
+    elif billing.enabled():
+        title = "無料デモの受付を終了しました" if account["total_exhausted"] else "デモ枠を使い切りました"
+        st.markdown(
+            f'<div class="mpp-done"><strong>{title}</strong>'
+            "<p>ご利用ありがとうございました。有料プランにお申し込みいただくと、続けてお使いいただけます。</p></div>",
+            unsafe_allow_html=True,
+        )
+        plan_panel()
+    else:
+        st.markdown(
+            '<div class="mpp-done"><strong>デモ枠を使い切りました</strong>'
+            "<p>ご利用ありがとうございました。本導入のご相談は、オーティスまでお気軽にご連絡ください。</p></div>",
+            unsafe_allow_html=True,
+        )
+    st.caption(CONTACT)
+    st.stop()
 
 # A new key per batch empties the uploader when starting over.
 upload_key = f"uploads_{st.session_state.get('batch', 0)}"
@@ -571,7 +740,7 @@ if uploads:
     ):
         # Count the photos against the store's limit before spending anything.
         try:
-            granted = demo_quota.reserve(code, count)
+            granted = demo_quota.reserve(code, count, monthly_quota=plan["quota"] if plan else None)
         except demo_quota.QuotaError as exc:
             st.error(f"{exc} 時間をおいてもう一度お試しください。")
             st.stop()
@@ -579,6 +748,7 @@ if uploads:
             st.rerun()
         uploads = uploads[:granted]
 
+        st.session_state.pop("flash", None)
         st.session_state["results"] = []
         errors = []
         processed = [None] * len(uploads)
@@ -641,12 +811,18 @@ if uploads:
 
         # Failed photos do not count toward the demo limit.
         try:
-            demo_quota.release(code, len(uploads) - len(st.session_state["results"]))
+            demo_quota.release(
+                code,
+                len(uploads) - len(st.session_state["results"]),
+                monthly_quota=plan["quota"] if plan else None,
+            )
         except demo_quota.QuotaError:
             pass
         st.rerun()
 
 if results:
+    st.button("← 最初に戻る", key="restart_top", on_click=start_over)
+
     head_col, view_col = st.columns([3, 2], vertical_alignment="bottom")
     with head_col:
         st.markdown(
@@ -734,8 +910,4 @@ if results:
                 )
                 st.image(r["full"], width="stretch")
 
-    if st.button("別の写真を仕上げる", width="stretch", key="restart"):
-        st.session_state.pop("results", None)
-        st.session_state.pop("errors", None)
-        st.session_state["batch"] = st.session_state.get("batch", 0) + 1
-        st.rerun()
+    st.button("最初に戻る（別の写真を仕上げる）", width="stretch", key="restart", on_click=start_over)

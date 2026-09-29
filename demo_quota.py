@@ -1,7 +1,14 @@
-"""Demo limits per store and in total, kept in a Google Sheet.
+"""Demo and paid-plan limits per store, kept in a Google Sheet.
 
 First worksheet (row 1 is the header), one row per store:
     A: お店  B: コード  C: 上限  D: 使用枚数  E: 最終利用日時  F: デモ用リンク  G: メモ
+    H: 有料プラン  I: StripeサブスクID  J: Stripe顧客ID  K: 対象月  L: 今月の使用枚数  M: 繰越枚数
+
+C/D are the free demo. Once a store subscribes, its photos count against the
+plan instead: every month (on the 1st) adds the plan's quota, and whatever is
+left over carries into the next month (M holds the carry at the start of month K).
+Cancelling ends the subscription, and a new one starts from zero.
+Which plan is active is read from Stripe (billing.py); H is only a label for people.
 
 Worksheet "設定" (created on first use):
     B1: 全店合計の上限   B2: 自動登録したお店の上限
@@ -20,6 +27,13 @@ COL_STORE = 1
 COL_CODE = 2
 COL_LIMIT = 3
 COL_USED = 4
+COL_PLAN = 8
+COL_SUBSCRIPTION = 9
+COL_CUSTOMER = 10
+COL_MONTH = 11
+COL_MONTH_USED = 12
+COL_CARRY = 13
+PAID_HEADERS = ["有料プラン", "StripeサブスクID", "Stripe顧客ID", "対象月", "今月の使用枚数", "繰越枚数"]
 
 SETTINGS_SHEET = "設定"
 DEFAULT_TOTAL_LIMIT = 3000
@@ -49,6 +63,10 @@ def _stores():
 
 def _now():
     return datetime.now(JST).strftime("%Y-%m-%d %H:%M")
+
+
+def _this_month():
+    return datetime.now(JST).strftime("%Y-%m")
 
 
 def _to_int(value, default=0):
@@ -96,13 +114,22 @@ def _read():
     except Exception as exc:
         raise QuotaError("デモ利用の管理表を読み込めませんでした。") from exc
 
-    rows = [row + [""] * 7 for row in rows]
+    if rows and len(rows[0]) < COL_CARRY:
+        _add_paid_headers()
+    rows = [row + [""] * COL_CARRY for row in rows]
     total_used = sum(
         _to_int(row[COL_USED - 1])
         for row in rows[1:]
         if row[COL_CODE - 1].strip() and not row[COL_CODE - 1].strip().startswith(INTERNAL_PREFIX)
     )
     return rows, total_used
+
+
+def _add_paid_headers():
+    try:
+        _stores().update(range_name="H1:M1", values=[PAID_HEADERS])
+    except Exception:
+        pass  # Only labels for people; the app works without them.
 
 
 def _account(rows, total_used, code):
@@ -122,6 +149,12 @@ def _account(rows, total_used, code):
                 "used": used,
                 "remaining": min(store_left, total_left),
                 "total_exhausted": total_left == 0,
+                "plan_label": row[COL_PLAN - 1].strip(),
+                "subscription_id": row[COL_SUBSCRIPTION - 1].strip(),
+                "customer_id": row[COL_CUSTOMER - 1].strip(),
+                "month": row[COL_MONTH - 1].strip(),
+                "month_used": _to_int(row[COL_MONTH_USED - 1]),
+                "carry": _to_int(row[COL_CARRY - 1]),
             }
     return None
 
@@ -165,23 +198,103 @@ def register(store_name, app_url):
     return code
 
 
-def reserve(code, count):
-    """Set aside up to `count` photos before editing. Returns how many were granted."""
+def _months_between(start, end):
+    """Whole months from "YYYY-MM" `start` to `end` (0 if unreadable)."""
+    try:
+        sy, sm = (int(x) for x in start.split("-"))
+        ey, em = (int(x) for x in end.split("-"))
+    except ValueError:
+        return 0
+    return max(0, (ey - sy) * 12 + (em - sm))
+
+
+def paid_balance(account, quota):
+    """This month's position on a paid plan: {'used', 'carry', 'remaining'}.
+
+    When a new month has started, last month's leftover (and a full quota for
+    any month skipped entirely) becomes the carry; nothing is written until
+    photos are used.
+    """
+    now = _this_month()
+    if account["month"] == now:
+        used, carry = account["month_used"], account["carry"]
+    elif account["month"]:
+        months = _months_between(account["month"], now)
+        leftover = max(0, quota + account["carry"] - account["month_used"])
+        carry = leftover + quota * max(0, months - 1) if months else account["carry"]
+        used = 0
+    else:
+        used, carry = 0, 0
+    return {"used": used, "carry": carry, "remaining": max(0, quota + carry - used)}
+
+
+def _write_month(row_number, used, carry):
+    try:
+        _stores().update(range_name=f"K{row_number}:M{row_number}", values=[[_this_month(), used, carry]])
+        _stores().update(range_name=f"E{row_number}", values=[[_now()]])
+    except Exception as exc:
+        raise QuotaError("デモ利用の管理表に書き込めませんでした。") from exc
+
+
+def link_subscription(code, subscription_id, customer_id, plan_label):
+    """Record a new subscription on the store's row."""
+    rows, total_used = _read()
+    account = _account(rows, total_used, code)
+    if not account:
+        return
+    try:
+        # A new subscription starts this month with nothing carried over.
+        _stores().update(
+            range_name=f"H{account['row']}:M{account['row']}",
+            values=[[plan_label, subscription_id, customer_id, _this_month(), 0, 0]],
+        )
+    except Exception as exc:
+        raise QuotaError("有料プランの登録に失敗しました。") from exc
+
+
+def set_plan_label(code, plan_label):
+    """Keep the human-readable plan column in step with Stripe."""
+    rows, total_used = _read()
+    account = _account(rows, total_used, code)
+    if account and account["plan_label"] != plan_label:
+        try:
+            _stores().update(range_name=f"H{account['row']}", values=[[plan_label]])
+        except Exception:
+            pass
+
+
+def reserve(code, count, monthly_quota=None):
+    """Set aside up to `count` photos before editing. Returns how many were granted.
+
+    With `monthly_quota` (a paid plan) photos count against this month's quota,
+    otherwise against the free demo.
+    """
     rows, total_used = _read()
     account = _account(rows, total_used, code)
     if not account:
         return 0
+    if monthly_quota is not None:
+        balance = paid_balance(account, monthly_quota)
+        granted = max(0, min(count, balance["remaining"]))
+        if granted:
+            _write_month(account["row"], balance["used"] + granted, balance["carry"])
+        return granted
     granted = max(0, min(count, account["remaining"]))
     if granted:
         _write_used(account["row"], account["used"] + granted)
     return granted
 
 
-def release(code, count):
+def release(code, count, monthly_quota=None):
     """Give back photos that were reserved but failed to edit."""
     if count <= 0:
         return
     rows, total_used = _read()
     account = _account(rows, total_used, code)
-    if account:
+    if not account:
+        return
+    if monthly_quota is not None:
+        balance = paid_balance(account, monthly_quota)
+        _write_month(account["row"], max(0, balance["used"] - count), balance["carry"])
+    else:
         _write_used(account["row"], max(0, account["used"] - count))
