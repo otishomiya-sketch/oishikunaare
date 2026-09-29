@@ -661,7 +661,12 @@ if billing.enabled():
         try:
             info = billing.subscription_plan(account["subscription_id"])
             plan = info["plan"]
-            label = plan["name"] if plan else f"停止中（{info['status']}）"
+            if plan:
+                label = plan["name"]
+            elif info["status"] == "missing":
+                label = "契約なし（Stripeに見つかりません）"
+            else:
+                label = f"停止中（{info['status']}）"
             if label != account["plan_label"]:
                 demo_quota.set_plan_label(code, label)
         except billing.BillingError:

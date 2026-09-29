@@ -30,7 +30,11 @@ PAID_STATUSES = {"active", "trialing", "past_due"}
 
 
 class BillingError(RuntimeError):
-    pass
+    def __init__(self, message, missing=False):
+        super().__init__(message)
+        # Stripe answered that the object does not exist (for example a
+        # sandbox subscription looked up with the live key).
+        self.missing = missing
 
 
 def _secret(name):
@@ -93,10 +97,12 @@ def _request(method, path, data=None, params=None):
         raise BillingError("決済サービスに接続できませんでした。") from exc
     if not response.ok:
         try:
-            message = response.json()["error"]["message"]
+            error = response.json()["error"]
+            message = error.get("message", "")
+            missing = error.get("code") == "resource_missing"
         except Exception:
-            message = response.text[:300]
-        raise BillingError(f"決済サービスでエラーが起きました（{message}）")
+            message, missing = response.text[:300], False
+        raise BillingError(f"決済サービスでエラーが起きました（{message}）", missing=missing)
     return response.json()
 
 
@@ -134,7 +140,12 @@ def completed_checkout(session_id, code):
 @st.cache_data(ttl=60, show_spinner=False)
 def subscription_plan(subscription_id):
     """{'plan': plan dict or None, 'status': str} for a subscription, cached for a minute."""
-    sub = _request("GET", f"subscriptions/{subscription_id}")
+    try:
+        sub = _request("GET", f"subscriptions/{subscription_id}")
+    except BillingError as exc:
+        if exc.missing:
+            return {"plan": None, "status": "missing"}
+        raise
     try:
         price = sub["items"]["data"][0]["price"]
         price_id = price["id"]
