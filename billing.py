@@ -2,7 +2,7 @@
 
 Streamlit cannot receive Stripe webhooks, so the app asks Stripe directly:
 after Checkout it reads the session, and later it checks the subscription's
-status and price (cached for a few minutes) to know the store's current plan.
+status and price (cached for a minute) to know the store's current plan.
 
 Secrets:
     STRIPE_SECRET_KEY    sk_live_... / sk_test_...
@@ -131,9 +131,9 @@ def completed_checkout(session_id, code):
     return session["subscription"], session.get("customer") or ""
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def subscription_plan(subscription_id):
-    """{'plan': plan dict or None, 'status': str} for a subscription, cached for 5 minutes."""
+    """{'plan': plan dict or None, 'status': str} for a subscription, cached for a minute."""
     sub = _request("GET", f"subscriptions/{subscription_id}")
     try:
         price = sub["items"]["data"][0]["price"]

@@ -228,7 +228,7 @@ div[data-testid="stFileUploaderDropzoneInstructions"] > div::after {
 
 /* Keep the main action within thumb reach while scrolling. */
 /* The device-memory helper renders nothing; keep it out of the layout. */
-.st-key-device_memory { position: absolute; width: 0; height: 0; overflow: hidden; }
+.st-key-device_memory, [class*="st-key-open_url_"] { position: absolute; width: 0; height: 0; overflow: hidden; }
 
 .st-key-run, .st-key-restart {
     position: sticky; bottom: 0; z-index: 10;
@@ -521,6 +521,22 @@ if st.query_params.get("code") != code:
 # ---- Paid plans (Stripe) ----
 
 
+_open_url = components.declare_component(
+    "open_url",
+    path=str(Path(__file__).parent / "open_url"),
+)
+
+
+def go_to(url, label):
+    """Move the page to Stripe right away, with a plain link in case the browser blocks it."""
+    _open_url(url=url, key=f"open_url_{url[-16:]}", default=None)
+    st.markdown(
+        f'<div class="mpp-note">Stripeの画面に移動しています…　自動で移動しない場合は'
+        f'<a href="{html.escape(url)}" target="_top">こちら（{html.escape(label)}）</a>を押してください。</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def plan_panel(current=None):
     """The three monthly plans with a sign-up button each (or a manage button if subscribed)."""
     st.markdown('<div class="mpp-section">料金プラン</div>', unsafe_allow_html=True)
@@ -542,13 +558,12 @@ def plan_panel(current=None):
             elif st.button("このプランで申し込む", key=f"plan_{p['key']}", width="stretch", type="primary"):
                 try:
                     _, url = billing.create_checkout(code, p, APP_URL)
-                    st.session_state["checkout"] = (p["name"], url)
                 except billing.BillingError as exc:
                     st.error(f"{exc} 時間をおいてもう一度お試しください。")
+                else:
+                    go_to(url, f"{p['name']}プランのお支払い画面")
 
-    if st.session_state.get("checkout") and not current:
-        name, url = st.session_state["checkout"]
-        st.link_button(f"{name}プランのお支払い画面へ進む（Stripe）", url, type="primary", width="stretch")
+    if not current:
         st.caption("カード情報はStripeの安全な画面で入力します。お支払いが終わると、自動でこの画面に戻ります。")
 
     if current:
@@ -576,13 +591,14 @@ def plan_panel(current=None):
 
 
 def manage_button():
-    if st.button("プランの変更・解約・カードの変更", key="portal", width="stretch"):
+    if st.button("プランの変更・解約・カードの変更", key="portal", width="stretch", type="primary"):
         try:
-            st.session_state["portal_url"] = billing.portal_url(account["customer_id"], code, APP_URL)
+            url = billing.portal_url(account["customer_id"], code, APP_URL)
         except billing.BillingError as exc:
             st.error(f"{exc} 時間をおいてもう一度お試しください。")
-    if st.session_state.get("portal_url"):
-        st.link_button("手続きの画面へ進む（Stripe）", st.session_state["portal_url"], width="stretch")
+        else:
+            st.session_state["portal_url"] = url
+            go_to(url, "手続きの画面")
 
 
 plan = None
@@ -608,6 +624,9 @@ if billing.enabled():
         billing.subscription_plan.clear()
         st.session_state.pop("portal_url", None)
         del st.query_params["portal"]
+    # The portal opens in another tab; while it may be in use, re-check Stripe on every action.
+    elif st.session_state.get("portal_url"):
+        billing.subscription_plan.clear()
 
     if account["subscription_id"]:
         try:
@@ -823,20 +842,18 @@ if uploads:
 if results:
     st.button("← 最初に戻る", key="restart_top", on_click=start_over)
 
-    head_col, view_col = st.columns([3, 2], vertical_alignment="bottom")
-    with head_col:
-        st.markdown(
-            f'<div class="mpp-section">仕上がり　{len(results)}枚</div>',
-            unsafe_allow_html=True,
-        )
-    with view_col:
-        view = st.segmented_control(
-            "表示",
-            [VIEW_SLIDER, VIEW_SIDE],
-            default=VIEW_SLIDER,
-            label_visibility="collapsed",
-            key="view",
-        ) or VIEW_SLIDER
+    st.markdown(
+        f'<div class="mpp-section">仕上がり　{len(results)}枚</div>',
+        unsafe_allow_html=True,
+    )
+    # On its own row so the labels never get cut off next to the heading.
+    view = st.segmented_control(
+        "表示",
+        [VIEW_SLIDER, VIEW_SIDE],
+        default=VIEW_SLIDER,
+        label_visibility="collapsed",
+        key="view",
+    ) or VIEW_SLIDER
 
     if len(results) > 1:
         save_button(

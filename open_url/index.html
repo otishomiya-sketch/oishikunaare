@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>open url</title>
+</head>
+<body>
+<script>
+  // Sends the whole page to args.url (Stripe Checkout or the Customer Portal) as
+  // soon as it renders, so one tap on the app's button is enough. Renders nothing.
+  //
+  // This frame is sandboxed without top navigation, so instead of setting
+  // top.location it adds a link to the top page (same origin) and clicks it there.
+  let done = false;
+
+  function send(type, data) {
+    window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*");
+  }
+
+  function go(url) {
+    for (const target of [window.top, window.parent]) {
+      try {
+        const doc = target.document;
+        const a = doc.createElement("a");
+        a.href = url;
+        a.target = "_top";
+        a.rel = "noopener";
+        doc.body.appendChild(a);
+        a.click();
+        a.remove();
+        return true;
+      } catch (e) {}
+    }
+    return false;
+  }
+
+  window.addEventListener("message", (event) => {
+    if (done || !event.data || event.data.type !== "streamlit:render") return;
+    const url = event.data.args.url;
+    if (!url || !/^https:\/\/(checkout|billing)\.stripe\.com\//.test(url)) return;
+    done = true;
+    send("streamlit:setComponentValue", { value: go(url), dataType: "json" });
+  });
+
+  send("streamlit:componentReady", { apiVersion: 1 });
+  send("streamlit:setFrameHeight", { height: 0 });
+</script>
+</body>
+</html>
