@@ -21,7 +21,7 @@ except ImportError:
     pass
 
 import demo_quota
-from before_after_video import make_video
+from before_after_video import make_image_video, make_video
 
 st.set_page_config(
     page_title="Menu Photo Pro",
@@ -256,6 +256,12 @@ div[data-testid="stFileUploaderDropzoneInstructions"] > div::after {
 """
 
 VIEW_SLIDER = "スライダーで比較"
+# label -> (style, description)
+VIDEO_STYLES = {
+    "仕上がりだけ（画面いっぱい）": ("full", "縦の画面いっぱいに、料理の上をゆっくり流れます"),
+    "仕上がりだけ（全体を見せる）": ("panel", "お皿全体を見せたまま、ゆっくり寄っていきます"),
+    "ビフォーアフター": ("before_after", "元の写真から仕上がりに切り替わります"),
+}
 VIEW_SIDE = "左右に並べる"
 
 
@@ -681,11 +687,17 @@ if results:
 
             save_button([(r["name"], r["full"])], "この写真を保存", key=f"save_{i}")
 
-            with st.expander("SNS用のビフォーアフター動画を作る（無料）"):
+            with st.expander("SNS用の動画を作る（無料）"):
                 st.markdown(
-                    '<div class="mpp-note">元の写真から仕上がりに切り替わる、縦長・約8秒の動画です。'
-                    "Instagramのリールやストーリーにそのまま使えます。デモの枚数には数えません。</div>",
+                    '<div class="mpp-note">縦長・約8秒の動画です。Instagramのリールやストーリーにそのまま使えます。'
+                    "写真を動かして作るので料理は変わらず、デモの枚数にも数えません。</div>",
                     unsafe_allow_html=True,
+                )
+                video_style = st.radio(
+                    "動画の種類",
+                    list(VIDEO_STYLES),
+                    key=f"video_style_{i}",
+                    captions=[VIDEO_STYLES[k][1] for k in VIDEO_STYLES],
                 )
                 caption = st.text_input(
                     "動画に入れる文字（任意）",
@@ -697,13 +709,18 @@ if results:
                 if st.button("動画を作る", key=f"make_video_{i}", width="stretch"):
                     with st.spinner("動画を作っています（10秒ほど）…"):
                         try:
-                            r["video"] = make_video(r["before_src"], r["full"], caption, credit)
+                            if VIDEO_STYLES[video_style][0] == "before_after":
+                                r["video"] = make_video(r["before_src"], r["full"], caption, credit)
+                            else:
+                                r["video"] = make_image_video(
+                                    r["full"], caption, credit, style=VIDEO_STYLES[video_style][0]
+                                )
                         except Exception as exc:
                             st.error(f"動画を作れませんでした。もう一度お試しください。（詳細：{exc}）")
                 if r.get("video"):
                     st.video(r["video"], format="video/mp4")
                     save_button(
-                        [(Path(r["name"]).stem + "_before-after.mp4", r["video"])],
+                        [(Path(r["name"]).stem + "_movie.mp4", r["video"])],
                         "動画を保存",
                         key=f"save_video_{i}",
                         mime="video/mp4",

@@ -115,6 +115,98 @@ def _ease(p):
     return p * p * (3 - 2 * p)
 
 
+def _writer(path):
+    return imageio.get_writer(
+        path, fps=FPS, codec="libx264", quality=8, pixelformat="yuv420p",
+        macro_block_size=16, ffmpeg_params=["-movflags", "+faststart"],
+    )
+
+
+def _faded(layer, k):
+    if k >= 1:
+        return layer
+    faded = layer.copy()
+    faded.putalpha(layer.getchannel("A").point(lambda a: int(a * k)))
+    return faded
+
+
+def _bottom_caption(caption, credit):
+    """Caption near the bottom over a soft dark gradient, for full-screen clips."""
+    layer = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    shade = Image.linear_gradient("L").resize((WIDTH, 520)).point(lambda v: int(v * 0.75))
+    layer.paste((20, 16, 13, 255), (0, HEIGHT - 520), shade)
+    draw = ImageDraw.Draw(layer)
+
+    title_font, has_japanese = _font(56)
+    if caption and caption.strip() and has_japanese:
+        lines = _wrap(draw, caption.strip(), title_font, WIDTH - 96)
+        y = HEIGHT - 190 - len(lines) * 72
+        for line in lines:
+            w = draw.textlength(line, font=title_font)
+            draw.text(((WIDTH - w) / 2, y), line, font=title_font, fill=WHITE)
+            y += 72
+    if credit:
+        small, has_japanese = _font(26)
+        text = "Menu Photo Pro で仕上げました" if has_japanese else "Edited with Menu Photo Pro"
+        w = draw.textlength(text, font=small)
+        draw.text(((WIDTH - w) / 2, HEIGHT - 70), text, font=small, fill=(255, 255, 255, 210))
+    return layer
+
+
+def make_image_video(after_bytes, caption="", credit=True, style="full"):
+    """An ~8 second clip of the finished photo alone.
+
+    style "full":  fills the vertical screen and drifts slowly across the dish.
+    style "panel": shows the whole dish on a blurred backdrop, slowly zooming.
+    The caption fades in after a moment.
+    """
+    image = _open(after_bytes)
+    fd, path = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    try:
+        writer = _writer(path)
+        if style == "panel":
+            photo = ImageOps.fit(image, (BOX_W * 2, BOX_H * 2), Image.Resampling.LANCZOS)
+            back = _backdrop(photo)
+            text = _overlay(caption, credit)
+            mask = Image.new("L", (BOX_W, BOX_H), 0)
+            ImageDraw.Draw(mask).rounded_rectangle((0, 0, BOX_W - 1, BOX_H - 1), 22, fill=255)
+        else:
+            # Scale so the photo is a little taller than the screen, leaving room to zoom.
+            scale = HEIGHT * 1.1 / image.height
+            photo = image.resize((max(WIDTH + 2, round(image.width * scale)), round(HEIGHT * 1.1)),
+                                 Image.Resampling.LANCZOS)
+            text = _bottom_caption(caption, credit)
+
+        for n in range(int(CLIP_END * FPS)):
+            t = n / FPS
+            p = _ease(t / CLIP_END)
+            if style == "panel":
+                frame = back.copy()
+                frame.paste(_zoomed(photo, 1.0 + 0.12 * p), (BOX_X, BOX_Y), mask)
+            else:
+                zoom = 1.0 + 0.08 * p
+                win_h = photo.height / zoom
+                win_w = min(win_h * WIDTH / HEIGHT, photo.width)
+                left = (photo.width - win_w) * (0.15 + 0.7 * p)
+                top = (photo.height - win_h) / 2
+                frame = photo.resize((WIDTH, HEIGHT), Image.Resampling.BILINEAR,
+                                     box=(left, top, left + win_w, top + win_h))
+            frame = frame.convert("RGBA")
+            frame.alpha_composite(_faded(text, min(1.0, max(0.0, (t - 0.8) / 0.8))))
+            frame = frame.convert("RGB")
+            if t < 0.4:
+                frame = Image.blend(Image.new("RGB", (WIDTH, HEIGHT), INK), frame, t / 0.4)
+            writer.append_data(np.asarray(frame))
+        writer.close()
+        return Path(path).read_bytes()
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def make_video(before_bytes, after_bytes, caption="", credit=True):
     """Return the MP4 bytes of the before/after clip."""
     # Both photos share the panel's 4:3 framing so the wipe lines up.
