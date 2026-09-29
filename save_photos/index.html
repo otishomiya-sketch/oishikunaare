@@ -46,11 +46,12 @@
     note.className = done ? "note done" : "note";
     fit();
   }
+  function isVideo() { return files.some((f) => f.type.startsWith("video/")); }
   function toFile(item) {
     const bytes = atob(item.data);
     const buffer = new Uint8Array(bytes.length);
     for (let i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
-    return new File([buffer], item.name, { type: "image/jpeg" });
+    return new File([buffer], item.name, { type: item.type || "image/jpeg" });
   }
 
   function download() {
@@ -77,7 +78,8 @@
     if (isIOS && navigator.canShare && navigator.canShare({ files: files })) {
       try {
         await navigator.share({ files: files });
-        say("「画像を保存」を選んでいれば、写真アプリに保存されています。", true);
+        say(isVideo() ? "「ビデオを保存」を選んでいれば、写真アプリに保存されています。"
+                      : "「画像を保存」を選んでいれば、写真アプリに保存されています。", true);
       } catch (e) {
         if (e && e.name === "AbortError") return;
         download();
@@ -94,7 +96,8 @@
     button.textContent = args.label || "写真に保存";
     button.className = args.secondary ? "secondary" : "";
     if (!note.classList.contains("done")) {
-      say(isIOS ? "押したあと、メニューの「画像を保存」を選ぶと写真アプリに入ります。" : "");
+      say(isIOS ? (isVideo() ? "押したあと、メニューの「ビデオを保存」を選ぶと写真アプリに入ります。"
+                             : "押したあと、メニューの「画像を保存」を選ぶと写真アプリに入ります。") : "");
     }
     fit();
   });

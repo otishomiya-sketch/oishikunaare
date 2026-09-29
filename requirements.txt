@@ -3,3 +3,6 @@ requests>=2.32,<3
 Pillow>=10,<13
 gspread>=6,<7
 pillow-heif>=0.18,<2
+imageio>=2.34,<3
+imageio-ffmpeg>=0.5,<1
+numpy>=1.26,<3
