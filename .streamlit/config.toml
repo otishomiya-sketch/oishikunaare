@@ -7,3 +7,5 @@ textColor = "#2A211C"
 
 [client]
 toolbarMode = "minimal"
+# Never show tracebacks or code to visitors; details stay in the "Manage app" logs.
+showErrorDetails = "none"
