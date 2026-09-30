@@ -3,6 +3,7 @@
 First worksheet (row 1 is the header), one row per store:
     A: お店  B: コード  C: 上限  D: 使用枚数  E: 最終利用日時  F: デモ用リンク  G: メモ
     H: 有料プラン  I: StripeサブスクID  J: Stripe顧客ID  K: 対象月  L: 今月の使用枚数  M: 繰越枚数
+    N: 登録日時  O: 社内用（「はい」で社内用）
 
 C/D are the free demo. Once a store subscribes, its photos count against the
 plan instead: every month (on the 1st) adds the plan's quota, and whatever is
@@ -13,8 +14,12 @@ Which plan is active is read from Stripe (billing.py); H is only a label for peo
 Worksheet "設定" (created on first use):
     B1: 全店合計の上限   B2: 自動登録したお店の上限
 
-Codes starting with "otis-" are internal test accounts: they are not counted
-toward, or limited by, the overall total.
+Worksheet "利用履歴" (created on first use), one row per finished batch:
+    A: 日時  B: コード  C: 種類（デモ／有料）  D: 枚数
+
+Internal accounts (codes starting with "otis-", or O set to はい) are not
+counted toward, or limited by, the overall total. A blank C means the default
+limit for new stores (設定 B2).
 """
 
 import secrets
@@ -33,7 +38,12 @@ COL_CUSTOMER = 10
 COL_MONTH = 11
 COL_MONTH_USED = 12
 COL_CARRY = 13
-PAID_HEADERS = ["有料プラン", "StripeサブスクID", "Stripe顧客ID", "対象月", "今月の使用枚数", "繰越枚数"]
+COL_REGISTERED = 14
+COL_INTERNAL = 15
+LAST_COL = COL_INTERNAL
+EXTRA_HEADERS = ["有料プラン", "StripeサブスクID", "Stripe顧客ID", "対象月", "今月の使用枚数", "繰越枚数", "登録日時", "社内用"]
+USAGE_SHEET = "利用履歴"
+INTERNAL_MARKS = {"はい", "TRUE", "true", "1", "社内", "社内用", "○", "◯"}
 
 SETTINGS_SHEET = "設定"
 DEFAULT_TOTAL_LIMIT = 3000
@@ -114,20 +124,30 @@ def _read():
     except Exception as exc:
         raise QuotaError("デモ利用の管理表を読み込めませんでした。") from exc
 
-    if rows and len(rows[0]) < COL_CARRY:
-        _add_paid_headers()
-    rows = [row + [""] * COL_CARRY for row in rows]
+    if rows and (len(rows[0]) < LAST_COL or not rows[0][LAST_COL - 1].strip()):
+        _add_extra_headers()
+    rows = [row + [""] * LAST_COL for row in rows]
     total_used = sum(
         _to_int(row[COL_USED - 1])
         for row in rows[1:]
-        if row[COL_CODE - 1].strip() and not row[COL_CODE - 1].strip().startswith(INTERNAL_PREFIX)
+        if row[COL_CODE - 1].strip() and not _is_internal(row)
     )
     return rows, total_used
 
 
-def _add_paid_headers():
+def _is_internal(row):
+    return row[COL_CODE - 1].strip().startswith(INTERNAL_PREFIX) or row[COL_INTERNAL - 1].strip() in INTERNAL_MARKS
+
+
+def _limit(row):
+    """The store's demo limit; a blank cell means the default for new stores."""
+    value = row[COL_LIMIT - 1].strip()
+    return _to_int(value) if value else settings()["store_limit"]
+
+
+def _add_extra_headers():
     try:
-        _stores().update(range_name="H1:M1", values=[PAID_HEADERS])
+        _stores().update(range_name="H1:O1", values=[EXTRA_HEADERS])
     except Exception:
         pass  # Only labels for people; the app works without them.
 
@@ -135,10 +155,10 @@ def _add_paid_headers():
 def _account(rows, total_used, code):
     for row_number, row in enumerate(rows, start=1):
         if row_number > 1 and row[COL_CODE - 1].strip() == code:
-            limit = _to_int(row[COL_LIMIT - 1])
+            limit = _limit(row)
             used = _to_int(row[COL_USED - 1])
             store_left = max(0, limit - used)
-            if code.startswith(INTERNAL_PREFIX):
+            if _is_internal(row):
                 total_left = store_left
             else:
                 total_left = max(0, settings()["total_limit"] - total_used)
@@ -190,7 +210,8 @@ def register(store_name, app_url):
     try:
         # RAW input stores the name as plain text, never as a formula.
         _stores().append_row(
-            [store_name, code, settings()["store_limit"], 0, _now(), f"{app_url}/?code={code}", "LINEのリンクから自動登録"],
+            [store_name, code, settings()["store_limit"], 0, _now(), f"{app_url}/?code={code}", "LINEのリンクから自動登録",
+             "", "", "", "", "", "", _now(), ""],
             value_input_option="RAW",
         )
     except Exception as exc:
@@ -298,3 +319,100 @@ def release(code, count, monthly_quota=None):
         _write_month(account["row"], max(0, balance["used"] - count), balance["carry"])
     else:
         _write_used(account["row"], max(0, account["used"] - count))
+
+
+# ---- Usage log and admin page ----
+
+
+def _usage_sheet():
+    book = _spreadsheet()
+    try:
+        return book.worksheet(USAGE_SHEET)
+    except gspread.WorksheetNotFound:
+        sheet = book.add_worksheet(USAGE_SHEET, rows=1000, cols=4)
+        sheet.update(range_name="A1:D1", values=[["日時", "コード", "種類", "枚数"]])
+        return sheet
+
+
+def log_usage(code, paid, count):
+    """Append one row per finished batch (used for the admin page's history)."""
+    if count <= 0:
+        return
+    try:
+        _usage_sheet().append_row([_now(), code, "有料" if paid else "デモ", count], value_input_option="RAW")
+    except Exception:
+        pass  # The history is for the admin page only; never block the store.
+
+
+def admin_snapshot():
+    """Everything the admin page shows, in two reads (stores and usage log)."""
+    rows, total_used = _read()
+    try:
+        usage = _usage_sheet().get_all_values()[1:]
+    except Exception:
+        usage = []
+    by_code = {}
+    for entry in usage:
+        entry = entry + [""] * 4
+        by_code.setdefault(entry[1].strip(), []).append(
+            {"time": entry[0].strip(), "kind": entry[2].strip(), "count": _to_int(entry[3])}
+        )
+    this_month = _this_month()
+    stores = []
+    for row_number, row in enumerate(rows[1:], start=2):
+        code = row[COL_CODE - 1].strip()
+        if not code:
+            continue
+        history = by_code.get(code, [])
+        stores.append({
+            "row": row_number,
+            "store": row[COL_STORE - 1].strip(),
+            "code": code,
+            "limit_raw": row[COL_LIMIT - 1].strip(),
+            "limit": _limit(row),
+            "used": _to_int(row[COL_USED - 1]),
+            "last_used": row[4].strip(),
+            "link": row[5].strip(),
+            "memo": row[6].strip(),
+            "plan_label": row[COL_PLAN - 1].strip(),
+            "subscription_id": row[COL_SUBSCRIPTION - 1].strip(),
+            "customer_id": row[COL_CUSTOMER - 1].strip(),
+            "month": row[COL_MONTH - 1].strip(),
+            "month_used": _to_int(row[COL_MONTH_USED - 1]),
+            "carry": _to_int(row[COL_CARRY - 1]),
+            "registered": row[COL_REGISTERED - 1].strip(),
+            "internal": _is_internal(row),
+            "internal_by_code": code.startswith(INTERNAL_PREFIX),
+            "history": sorted(history, key=lambda h: h["time"], reverse=True),
+            "count_month": sum(h["count"] for h in history if h["time"].startswith(this_month)),
+            "count_total": sum(h["count"] for h in history),
+        })
+    return {"stores": stores, "demo_used": total_used, "settings": settings(), "month": this_month}
+
+
+def save_settings(total_limit, store_limit):
+    try:
+        _spreadsheet().worksheet(SETTINGS_SHEET).update(range_name="B1:B2", values=[[total_limit], [store_limit]])
+    except Exception as exc:
+        raise QuotaError("設定を保存できませんでした。") from exc
+    settings.clear()
+
+
+def admin_update(code, internal, limit, used, memo):
+    """Change one store's demo settings. `limit` None means the default."""
+    rows, _ = _read()
+    for row_number, row in enumerate(rows, start=1):
+        if row_number > 1 and row[COL_CODE - 1].strip() == code:
+            try:
+                # RAW keeps the memo as plain text, never a formula.
+                _stores().update(
+                    range_name=f"C{row_number}:D{row_number}",
+                    values=[["" if limit is None else limit, used]],
+                    value_input_option="RAW",
+                )
+                _stores().update(range_name=f"G{row_number}", values=[[memo]], value_input_option="RAW")
+                _stores().update(range_name=f"O{row_number}", values=[["はい" if internal else ""]], value_input_option="RAW")
+            except Exception as exc:
+                raise QuotaError("お店の設定を保存できませんでした。") from exc
+            return True
+    return False

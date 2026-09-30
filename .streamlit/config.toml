@@ -7,5 +7,7 @@ textColor = "#2A211C"
 
 [client]
 toolbarMode = "minimal"
+# The admin page (pages/admin.py) must not appear in a menu for stores.
+showSidebarNavigation = false
 # Never show tracebacks or code to visitors; details stay in the "Manage app" logs.
 showErrorDetails = "none"

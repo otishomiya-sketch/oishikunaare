@@ -57,7 +57,94 @@ def _backdrop(image):
     return Image.blend(cover, Image.new("RGB", (WIDTH, HEIGHT), INK), 0.45)
 
 
-def _wrap(draw, text, font, max_width):
+# Caption sizes to try, largest first: short captions stay big and bold,
+# long ones shrink until they fit in at most three lines.
+CAPTION_SIZES = range(76, 33, -4)
+CAPTION_MAX_LINES = 3
+CAPTION_WIDTH = WIDTH - 96
+# Good places to break a line, and characters that must not start one.
+BREAK_AFTER = set(" 　、。，．・/／!！?？)）」』】")
+NO_LINE_START = set("、。，．・!！?？)）」』】ーぁぃぅぇぉっゃゅょァィゥェォッャュョ")
+
+
+MEASURE_SIZE = 100
+
+
+# Particles after which Japanese reads naturally on a new line, when the next
+# character starts a new word (kanji or katakana), e.g. じゃがいもと|厚切り.
+SOFT_BREAK_AFTER = set("のとをにでがはへや")
+HIRAGANA = range(0x3041, 0x30A0)
+
+
+def _break_points(text):
+    """{position: penalty} for places a line may end: 0 after spaces or
+    punctuation, more after a particle (used when no better break is near)."""
+    points = {}
+    for i in range(1, len(text)):
+        before, after = text[i - 1], text[i]
+        if after in NO_LINE_START:
+            continue
+        if before in BREAK_AFTER:
+            points[i] = 0
+        elif before in SOFT_BREAK_AFTER and ord(after) not in HIRAGANA and not after.isspace():
+            points[i] = 14
+    return points
+
+
+def _balanced_cuts(text, lines_wanted):
+    """Character positions that split `text` into equal-length lines."""
+    cuts = []
+    for k in range(1, lines_wanted):
+        cut = round(len(text) * k / lines_wanted)
+        while cut < len(text) and text[cut] in NO_LINE_START:
+            cut += 1
+        cuts.append(cut)
+    return cuts
+
+
+def _candidates(text):
+    """(lines, penalty) layouts with up to three lines."""
+    yield [text], 0
+    points = _break_points(text)
+    ordered = sorted(points)
+    for i, a in enumerate(ordered):
+        yield [text[:a], text[a:]], points[a]
+        for b in ordered[i + 1:]:
+            yield [text[:a], text[a:b], text[b:]], points[a] + points[b]
+    # Evenly split, possibly mid-word (a last resort).
+    for lines_wanted in (2, 3):
+        cuts = [0] + _balanced_cuts(text, lines_wanted) + [len(text)]
+        if all(x < y for x, y in zip(cuts, cuts[1:])):
+            yield [text[x:y] for x, y in zip(cuts, cuts[1:])], 16 * (lines_wanted - 1)
+
+
+LINE_SPACING = 1.3
+# Instagram/TikTok draw their own buttons over the top of the screen.
+SAFE_TOP = 170
+
+
+def _fit_caption(draw, text, max_width=CAPTION_WIDTH, max_height=10_000):
+    """(font, size, lines) that read best: a big size, few lines, and line
+    breaks at spaces or punctuation rather than in the middle of a word."""
+    text = " ".join(text.split())
+    probe, _ = _font(MEASURE_SIZE)
+    best = None
+    for lines, penalty in _candidates(text):
+        lines = [line.strip() for line in lines if line.strip()]
+        widest = max(draw.textlength(line, font=probe) for line in lines)
+        size = min(CAPTION_SIZES[0], int(max_width * MEASURE_SIZE / widest) // 2 * 2)
+        size = min(size, int(max_height / (len(lines) * LINE_SPACING)) // 2 * 2)
+        if size < CAPTION_SIZES[-1]:
+            continue
+        score = size - 8 * (len(lines) - 1) - penalty
+        if best is None or score > best[0]:
+            best = (score, size, lines)
+    if best:
+        _, size, lines = best
+        return _font(size)[0], size, lines
+    # Very long text: smallest size, wrapped greedily.
+    size = CAPTION_SIZES[-1]
+    font, _ = _font(size)
     lines, line = [], ""
     for ch in text:
         if draw.textlength(line + ch, font=font) > max_width and line:
@@ -65,9 +152,25 @@ def _wrap(draw, text, font, max_width):
             line = ch
         else:
             line += ch
-    if line:
-        lines.append(line)
-    return lines[:2]
+    return font, size, (lines + [line])[:CAPTION_MAX_LINES]
+
+
+def _draw_caption(draw, text, bottom, outline, top_limit=SAFE_TOP):
+    """Draw `text` centred, its last line ending at `bottom` and its first
+    line no higher than `top_limit`; returns the top."""
+    font, size, lines = _fit_caption(draw, text, max_height=bottom - top_limit)
+    line_height = round(size * LINE_SPACING)
+    top = bottom - line_height * len(lines)
+    y = top
+    for line in lines:
+        w = draw.textlength(line, font=font)
+        if outline:
+            draw.text(((WIDTH - w) / 2, y), line, font=font, fill=WHITE,
+                      stroke_width=max(2, size // 18), stroke_fill=(20, 16, 13, 160))
+        else:
+            draw.text(((WIDTH - w) / 2, y), line, font=font, fill=WHITE)
+        y += line_height
+    return top
 
 
 def _overlay(caption, credit):
@@ -75,15 +178,10 @@ def _overlay(caption, credit):
     layer = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
 
-    title_font, has_japanese = _font(56)
-    text = caption.strip() if caption and has_japanese else "BEFORE → AFTER"
-    lines = _wrap(draw, text, title_font, WIDTH - 96)
-    y = BOX_Y - 60 - len(lines) * 72
-    for line in lines:
-        w = draw.textlength(line, font=title_font)
-        draw.text(((WIDTH - w) / 2, y), line, font=title_font, fill=WHITE,
-                  stroke_width=3, stroke_fill=(20, 16, 13, 160))
-        y += 72
+    _, has_japanese = _font(56)
+    text = caption.strip() if caption and caption.strip() and has_japanese else "BEFORE → AFTER"
+    # Sits just above the photo panel, growing upward with more lines.
+    _draw_caption(draw, text, bottom=BOX_Y - 40, outline=True)
 
     if credit:
         small, has_japanese = _font(26)
@@ -137,14 +235,10 @@ def _bottom_caption(caption, credit):
     layer.paste((20, 16, 13, 255), (0, HEIGHT - 520), shade)
     draw = ImageDraw.Draw(layer)
 
-    title_font, has_japanese = _font(56)
+    _, has_japanese = _font(56)
     if caption and caption.strip() and has_japanese:
-        lines = _wrap(draw, caption.strip(), title_font, WIDTH - 96)
-        y = HEIGHT - 190 - len(lines) * 72
-        for line in lines:
-            w = draw.textlength(line, font=title_font)
-            draw.text(((WIDTH - w) / 2, y), line, font=title_font, fill=WHITE)
-            y += 72
+        # Ends above the credit line, growing upward with more lines.
+        _draw_caption(draw, caption.strip(), bottom=HEIGHT - 120, outline=False)
     if credit:
         small, has_japanese = _font(26)
         text = "Menu Photo Pro で仕上げました" if has_japanese else "Edited with Menu Photo Pro"
