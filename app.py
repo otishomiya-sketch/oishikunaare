@@ -448,6 +448,38 @@ st.markdown(
 APP_URL = "https://7ayyryczawpyuggappqsqqd.streamlit.app"
 CONTACT = "お問い合わせ：オーティス"
 
+# ---- Outreach tracking ----
+# Sales messages from the outreach app (menu-outreach) link here with
+# ?ref=<shop code>-<channel><message id>. We tell it when such a store starts
+# the free demo and when it starts a paid plan, so it can learn which message
+# worked. The demo code is sent too, so a payment days later still matches.
+
+OUTREACH_TRACK_URL = str(
+    st.secrets.get("OUTREACH_TRACK_URL", "https://web-production-2defbe.up.railway.app/api/track")
+).strip()
+if st.query_params.get("ref"):
+    st.session_state["outreach_ref"] = st.query_params["ref"][:40]
+
+
+def report_outreach(event, demo_code, store_name=None):
+    """Best effort: a failure here must never get in the store's way."""
+    ref = st.session_state.get("outreach_ref", "")
+    if not OUTREACH_TRACK_URL or (event == "trial" and not ref):
+        return
+    headers = {}
+    token = str(st.secrets.get("OUTREACH_TRACK_TOKEN", "")).strip()
+    if token:
+        headers["X-Track-Token"] = token
+    try:
+        requests.post(
+            OUTREACH_TRACK_URL,
+            json={"ref": ref, "event": event, "code": demo_code, "shop_name": store_name},
+            headers=headers,
+            timeout=3,
+        )
+    except requests.RequestException:
+        pass
+
 
 def opened_in_line():
     """LINE's in-app browser (User-Agent contains "Line/<version>")."""
@@ -535,6 +567,7 @@ def start_screen(message=None):
                 except demo_quota.QuotaError as exc:
                     st.error(f"{exc} 時間をおいてもう一度お試しください。")
                     st.stop()
+                report_outreach("trial", new_code, name.strip())
                 st.session_state["save_code"] = new_code
                 st.query_params["code"] = new_code
                 st.rerun()
@@ -631,6 +664,7 @@ def plan_panel(current=None):
                     sub_id, customer_id = found
                     info = billing.subscription_plan(sub_id)
                     demo_quota.link_subscription(code, sub_id, customer_id, info["plan"]["name"] if info["plan"] else "")
+                    report_outreach("paid", code)
                     st.session_state["flash"] = "ご契約を確認しました。有料プランをご利用いただけます。"
                     st.rerun()
                 else:
@@ -687,6 +721,7 @@ if billing.enabled():
                 sub_id, customer_id = done
                 info = billing.subscription_plan(sub_id)
                 demo_quota.link_subscription(code, sub_id, customer_id, info["plan"]["name"] if info["plan"] else "")
+                report_outreach("paid", code)
                 st.session_state["flash"] = "お申し込みありがとうございます。有料プランが始まりました。"
                 st.session_state.pop("checkout", None)
                 account = demo_quota.get_account(code)
