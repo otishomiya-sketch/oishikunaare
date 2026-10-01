@@ -165,6 +165,8 @@ demo = [s for s in stores if status(s) == "demo"]
 internal = [s for s in stores if status(s) == "internal"]
 plan_counts = {name: sum(1 for s in paid if s["plan_label"] == name) for name in plans_by_name}
 revenue = sum(plans_by_name[s["plan_label"]]["price"] for s in paid)
+from_flyer = [s for s in stores if s["memo"] == demo_quota.SOURCE_NOTES["flyer"]]
+from_outreach = [s for s in stores if s["memo"] == demo_quota.SOURCE_NOTES["outreach"]]
 month_total = sum(s["count_month"] for s in stores)
 all_total = sum(s["count_total"] for s in stores)
 year, month = snapshot["month"].split("-")
@@ -187,6 +189,10 @@ st.markdown(
     + stat("社内用", f"{len(internal)}件")
     + stat("月の売上見込み", f"{revenue:,}円", "税別・契約中のプランから計算")
     + stat("仕上げた写真", f"今月 {month_total:,}枚", f"合計 {all_total:,}枚（利用履歴より）")
+    + stat("チラシ（交流会）から", f"{len(from_flyer)}店",
+           f"うち有料 {sum(1 for s in from_flyer if status(s) == 'paid')}店")
+    + stat("営業メッセージから", f"{len(from_outreach)}店",
+           f"うち有料 {sum(1 for s in from_outreach if status(s) == 'paid')}店")
     + "</div>",
     unsafe_allow_html=True,
 )

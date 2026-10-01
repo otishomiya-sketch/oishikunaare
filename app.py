@@ -459,6 +459,16 @@ OUTREACH_TRACK_URL = str(
 ).strip()
 if st.query_params.get("ref"):
     st.session_state["outreach_ref"] = st.query_params["ref"][:40]
+# ?src=flyer comes from the QR code on the event flyer.
+if st.query_params.get("src"):
+    st.session_state["signup_source"] = st.query_params["src"][:20]
+
+
+def signup_source():
+    """Where a newly registering store came from (written to the sheet's memo column)."""
+    if st.session_state.get("outreach_ref"):
+        return "outreach"
+    return st.session_state.get("signup_source")
 
 
 def report_outreach(event, demo_code, store_name=None):
@@ -563,7 +573,7 @@ def start_screen(message=None):
                 st.error("お店の名前を入れてください。")
             else:
                 try:
-                    new_code = demo_quota.register(name.strip(), APP_URL)
+                    new_code = demo_quota.register(name.strip(), APP_URL, source=signup_source())
                 except demo_quota.QuotaError as exc:
                     st.error(f"{exc} 時間をおいてもう一度お試しください。")
                     st.stop()

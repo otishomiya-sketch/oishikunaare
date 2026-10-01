@@ -199,7 +199,15 @@ def get_account(code):
     return _account(rows, total_used, code)
 
 
-def register(store_name, app_url):
+# Column G note: how the store found the app (shown and counted on the admin page).
+SOURCE_NOTES = {
+    "flyer": "チラシ（交流会）から自動登録",
+    "outreach": "営業メッセージから自動登録",
+}
+DEFAULT_SOURCE_NOTE = "LINEのリンクから自動登録"
+
+
+def register(store_name, app_url, source=None):
     """Add a store with the default limit and return its new code."""
     rows, _ = _read()
     taken = {row[COL_CODE - 1].strip() for row in rows}
@@ -210,7 +218,8 @@ def register(store_name, app_url):
     try:
         # RAW input stores the name as plain text, never as a formula.
         _stores().append_row(
-            [store_name, code, settings()["store_limit"], 0, _now(), f"{app_url}/?code={code}", "LINEのリンクから自動登録",
+            [store_name, code, settings()["store_limit"], 0, _now(), f"{app_url}/?code={code}",
+             SOURCE_NOTES.get(source, DEFAULT_SOURCE_NOTE),
              "", "", "", "", "", "", _now(), ""],
             value_input_option="RAW",
         )
