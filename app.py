@@ -247,22 +247,23 @@ div[data-testid="stFileUploaderDropzoneInstructions"] > div::before {
 div[data-testid="stFileUploaderDropzoneInstructions"] > div::after {
     content: "複数枚まとめて選べます（JPG・PNG・WebP・HEIC）"; display: block; font-size: 13px; color: #6A5D53;
 }
-/* Replace the button's own icon and "Upload"/"Browse files" text (which keeps its
+/* The small "remove photo" (×) button is minimal and keeps its own look.
+   Replace the button's own icon and "Upload"/"Browse files" text (which keeps its
    width even when hidden) with a centred photo icon and Japanese label. */
-[data-testid="stFileUploaderDropzone"] button {
+[data-testid="stFileUploaderDropzone"] button:not([data-testid="stBaseButton-minimal"]) {
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     min-height: 48px; border-radius: 999px; padding: 0 24px;
     background: #2A211C; border-color: #2A211C; color: #FFFFFF;
     font-size: 0 !important;  /* older Streamlit puts "Browse files" as bare text */
 }
-[data-testid="stFileUploaderDropzone"] button > * { display: none !important; }
-[data-testid="stFileUploaderDropzone"] button::before {
+[data-testid="stFileUploaderDropzone"] button:not([data-testid="stBaseButton-minimal"]) > * { display: none !important; }
+[data-testid="stFileUploaderDropzone"] button:not([data-testid="stBaseButton-minimal"])::before {
     content: ""; width: 20px; height: 20px; flex-shrink: 0; background: currentColor;
     -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Ccircle cx='9' cy='10' r='1.6'/%3E%3Cpath d='M21 16l-5-5-8 8'/%3E%3C/svg%3E") center / contain no-repeat;
             mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Ccircle cx='9' cy='10' r='1.6'/%3E%3Cpath d='M21 16l-5-5-8 8'/%3E%3C/svg%3E") center / contain no-repeat;
 }
-[data-testid="stFileUploaderDropzone"] button::after { content: "写真を選ぶ"; font-size: 16px; font-weight: 700; line-height: 1; color: #FFFFFF; }
-@media (max-width: 640px) { [data-testid="stFileUploaderDropzone"] button { width: 100%; } }
+[data-testid="stFileUploaderDropzone"] button:not([data-testid="stBaseButton-minimal"])::after { content: "写真を選ぶ"; font-size: 16px; font-weight: 700; line-height: 1; color: #FFFFFF; }
+@media (max-width: 640px) { [data-testid="stFileUploaderDropzone"] button:not([data-testid="stBaseButton-minimal"]) { width: 100%; } }
 
 /* Keep the main action within thumb reach while scrolling. */
 /* The device-memory helper renders nothing; keep it out of the layout. */
