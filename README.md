@@ -31,7 +31,7 @@ client_x509_cert_url = "..."
 ## デモ利用制限
 
 ### お店の使い方
-1. 公式LINEで、全店に同じアプリのリンク（`https://7ayyryczawpyuggappqsqqd.streamlit.app`）を送る。
+1. 公式LINEで、全店に同じアプリのリンク（`https://menu.otis.company`）を送る。
 2. お店は初回だけ「お店の名前」を入れて「デモを始める」を押す。そのお店用の枠が自動で作られる。
 3. 同じスマホなら、次からはLINEのリンクを開くだけで続きから使える（コードをブラウザに記憶）。
 
@@ -101,7 +101,7 @@ Stripeの設定がSecretsにない間は、料金プランは表示されませ�
 
 ## 管理画面
 
-`https://7ayyryczawpyuggappqsqqd.streamlit.app/admin`（お店の画面からはリンクしていません）
+`https://menu.otis.company/admin`（お店の画面からはリンクしていません）
 
 - Secrets に `ADMIN_PASSWORD` を入れると使えるようになります。入っていない間は「ページが見つかりません」と表示されます。
 - 同じ接続元から10分で5回パスワードを間違えると、10分間ログインできなくなります。ブラウザを閉じると入り直しです。

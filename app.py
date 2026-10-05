@@ -446,7 +446,7 @@ st.markdown(
 # reopening the LINE link continues where they left off.
 
 # The public address of this app. Set APP_URL in Secrets when it moves.
-APP_URL = str(st.secrets.get("APP_URL", "https://7ayyryczawpyuggappqsqqd.streamlit.app")).strip().rstrip("/")
+APP_URL = str(st.secrets.get("APP_URL", "https://menu.otis.company")).strip().rstrip("/")
 CONTACT = "お問い合わせ：オーティス"
 
 # ---- Outreach tracking ----
