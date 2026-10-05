@@ -445,7 +445,8 @@ st.markdown(
 # demo allowance. Their code is kept in the URL and in this browser, so
 # reopening the LINE link continues where they left off.
 
-APP_URL = "https://7ayyryczawpyuggappqsqqd.streamlit.app"
+# The public address of this app. Set APP_URL in Secrets when it moves.
+APP_URL = str(st.secrets.get("APP_URL", "https://7ayyryczawpyuggappqsqqd.streamlit.app")).strip().rstrip("/")
 CONTACT = "お問い合わせ：オーティス"
 
 # ---- Outreach tracking ----
