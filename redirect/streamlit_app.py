@@ -21,20 +21,22 @@ params = {k: v for k, v in st.query_params.items()}
 target = f"{NEW_URL}/?{urlencode(params)}" if params else f"{NEW_URL}/"
 
 st.markdown("### Menu Photo Pro は新しいアドレスに移りました")
-st.write("自動で移動します。移動しない場合は、下のボタンを押してください。")
-st.link_button("新しいページを開く", target, type="primary", width="stretch")
+st.write("下のボタンを押すと、新しいページが開きます。")
+st.link_button("👉 新しいページを開く", target, type="primary", width="stretch")
 st.caption(f"新しいアドレス：{NEW_URL}")
 
-# Components run in a sandboxed frame that may not move the page itself, so the
-# script is added to the app's own document, which then moves the whole tab
-# (or at least the app frame). The button above stays as the fallback.
+# Streamlit Community Cloud shows apps inside a sandboxed frame that may not move
+# the whole tab, so the button (which opens a new tab outside the frame) is the
+# main path. Where the page is not framed (e.g. run locally), move the tab
+# automatically. Never load the app inside the frame: payments and the saved
+# demo code do not work reliably there.
 target_js = json.dumps(target)
 components.html(
     "<script>"
     "try {"
     "  var d = window.parent.document, s = d.createElement('script');"
-    f"  s.textContent = 'try {{ window.top.location.replace(' + {json.dumps(target_js)} + '); }}"
-    f" catch (e) {{ window.location.replace(' + {json.dumps(target_js)} + '); }}';"
+    f"  s.textContent = 'try {{ if (window.top === window) window.location.replace(' + {json.dumps(target_js)} + ');"
+    f" else window.top.location.replace(' + {json.dumps(target_js)} + '); }} catch (e) {{}}';"
     "  d.body.appendChild(s);"
     "} catch (e) {}"
     "</script>",
