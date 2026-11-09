@@ -197,6 +197,89 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ---- Where visitors stop ----
+
+FUNNEL_DAYS = 7
+
+
+def funnel_rows(visits, keys):
+    """[(label, count, share of the first step)] for visits that reached each step."""
+    labels = [demo_quota.EVENT_LABELS[k] for k in keys]
+    base = sum(1 for v in visits if labels[0] in v["steps"]) or 1
+    rows = []
+    for label in labels:
+        n = sum(1 for v in visits if label in v["steps"])
+        rows.append((label, n, n * 100 // base))
+    return rows
+
+
+def funnel_html(rows):
+    out = []
+    for i, (label, n, pct) in enumerate(rows):
+        drop = ""
+        if i and rows[i - 1][1]:
+            lost = rows[i - 1][1] - n
+            if lost > 0:
+                drop = f'<span style="color:#B7412A">　↓ {lost}回ここで離脱</span>'
+        out.append(
+            f'<div class="adm-line" style="margin:2px 0">{html.escape(label)}　<b>{n}回</b>（{pct}%）{drop}</div>'
+            f'<div style="height:8px;background:#F3E7CF;border-radius:4px;margin-bottom:6px">'
+            f'<div style="height:8px;width:{pct}%;background:#B7412A;border-radius:4px"></div></div>'
+        )
+    return "".join(out)
+
+
+with st.expander(f"どこで離れているか（直近{FUNNEL_DAYS}日）", expanded=True):
+    try:
+        visits = list(demo_quota.visit_steps(FUNNEL_DAYS)["visits"].values())
+    except demo_quota.QuotaError as exc:
+        visits = None
+        st.caption(f"{exc}（記録が始まると表示されます）")
+    if visits is not None:
+        start_label = demo_quota.EVENT_LABELS["start_screen"]
+        upload_label = demo_quota.EVENT_LABELS["upload_screen"]
+        newcomers = [v for v in visits if start_label in v["steps"]]
+        returning = [v for v in visits if start_label not in v["steps"] and upload_label in v["steps"]]
+        stalled = [v for v in visits if start_label not in v["steps"] and upload_label not in v["steps"]]
+        st.caption(
+            f"訪問 {len(visits)}回（社内用を除く）。1回の訪問で同じ操作は1回だけ数えます。"
+            "ページを開いても表示を待たずに閉じた人は「読み込み中に閉じた」に入ります。"
+        )
+        st.markdown("**初めて来た人**（登録画面から）")
+        st.markdown(
+            funnel_html(funnel_rows(newcomers, ["start_screen", "register", "upload_screen", "select", "process", "done", "save"])),
+            unsafe_allow_html=True,
+        )
+        st.markdown("**登録済みのお店**（2回目以降）")
+        st.markdown(
+            funnel_html(funnel_rows(returning, ["upload_screen", "select", "process", "done", "save"])),
+            unsafe_allow_html=True,
+        )
+        side = [
+            (label, sum(1 for v in visits if label in v["steps"]))
+            for _, label in demo_quota.SIDE_EVENTS
+        ]
+        side.insert(0, ("読み込み中に閉じた（画面が出る前）", len(stalled)))
+        st.markdown("**そのほか**")
+        st.markdown(
+            "".join(f'<div class="adm-line">{html.escape(label)}　<b>{n}回</b></div>' for label, n in side),
+            unsafe_allow_html=True,
+        )
+        devices = {}
+        for v in visits:
+            devices[v["device"] or "不明"] = devices.get(v["device"] or "不明", 0) + 1
+        sources = {}
+        for v in visits:
+            sources[v["source"] or "リンク（LINE・DMなど）"] = sources.get(v["source"] or "リンク（LINE・DMなど）", 0) + 1
+        st.markdown(
+            '<div class="adm-line" style="margin-top:6px">端末：'
+            + "　".join(f"{html.escape(k)} {n}" for k, n in sorted(devices.items(), key=lambda x: -x[1]))
+            + "<br>経路："
+            + "　".join(f"{html.escape(k)} {n}" for k, n in sorted(sources.items(), key=lambda x: -x[1]))
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
 # ---- Demo settings ----
 
 with st.expander("無料デモの設定"):

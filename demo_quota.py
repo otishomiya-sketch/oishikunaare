@@ -17,12 +17,17 @@ Worksheet "設定" (created on first use):
 Worksheet "利用履歴" (created on first use), one row per finished batch:
     A: 日時  B: コード  C: 種類（デモ／有料）  D: 枚数
 
+Worksheet "行動ログ" (created on first use), one row per step a visitor reached
+(each step once per visit), to see where people stop:
+    A: 日時  B: 訪問ID  C: コード  D: 操作  E: 詳細  F: 端末  G: 経路
+
 Internal accounts (codes starting with "otis-", or O set to はい) are not
 counted toward, or limited by, the overall total. A blank C means the default
 limit for new stores (設定 B2).
 """
 
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import gspread
@@ -351,6 +356,94 @@ def log_usage(code, paid, count):
         _usage_sheet().append_row([_now(), code, "有料" if paid else "デモ", count], value_input_option="RAW")
     except Exception:
         pass  # The history is for the admin page only; never block the store.
+
+
+# ---- Visit steps (where people stop) ----
+
+EVENTS_SHEET = "行動ログ"
+EVENTS_HEADER = ["日時", "訪問ID", "コード", "操作", "詳細", "端末", "経路"]
+# The main path, in order. A visit that registers goes through every step;
+# a returning store starts at "upload_screen".
+FUNNEL = [
+    ("open", "画面を開いた"),
+    ("start_screen", "登録画面を見た"),
+    ("register", "デモに登録した"),
+    ("upload_screen", "写真を選ぶ画面を見た"),
+    ("select", "写真を選んだ"),
+    ("process", "仕上げを押した"),
+    ("done", "仕上がりを見た"),
+    ("save", "保存を押した"),
+]
+# Other things worth counting, outside the main path.
+SIDE_EVENTS = [
+    ("register_empty", "名前を入れずに登録を押した"),
+    ("code_entered", "デモコードを入れた"),
+    ("quota_empty", "残り0枚の画面を見た"),
+    ("error", "仕上げに失敗した"),
+    ("video", "動画を作った"),
+    ("checkout", "有料プランの申し込みを押した"),
+    ("paid", "有料プランが始まった"),
+]
+EVENT_LABELS = dict(FUNNEL + SIDE_EVENTS)
+
+
+@st.cache_resource(show_spinner=False)
+def _event_writer():
+    # One background writer: logging never slows the store's screen, and rows keep their order.
+    return ThreadPoolExecutor(max_workers=1)
+
+
+def _events_sheet():
+    book = _spreadsheet()
+    try:
+        return book.worksheet(EVENTS_SHEET)
+    except gspread.WorksheetNotFound:
+        sheet = book.add_worksheet(EVENTS_SHEET, rows=1000, cols=len(EVENTS_HEADER))
+        sheet.update(range_name="A1:G1", values=[EVENTS_HEADER])
+        return sheet
+
+
+def _append_event(row):
+    try:
+        _events_sheet().append_row(row, value_input_option="RAW")
+    except Exception:
+        pass  # For the admin page only; never block the store.
+
+
+def log_event(visit, code, event, detail="", device="", source=""):
+    """Record that a visit reached a step (written in the background)."""
+    row = [
+        datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"), visit, code or "",
+        EVENT_LABELS.get(event, event), str(detail), device, source,
+    ]
+    print("[step] " + " | ".join(str(v) for v in row), flush=True)
+    _event_writer().submit(_append_event, row)
+
+
+def visit_steps(days=7):
+    """Steps per visit over the last `days` days, internal accounts left out.
+
+    Returns {'visits': {visit_id: {'steps': set of labels, 'device', 'source', 'first'}}}.
+    """
+    since = (datetime.now(JST) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows, _ = _read()
+    internal = {row[COL_CODE - 1].strip() for row in rows[1:] if _is_internal(row)}
+    try:
+        entries = _events_sheet().get_all_values()[1:]
+    except Exception as exc:
+        raise QuotaError("行動ログを読み込めませんでした。") from exc
+    visits = {}
+    skip = set()
+    for entry in entries:
+        entry = entry + [""] * len(EVENTS_HEADER)
+        time, visit, code, label = (v.strip() for v in entry[:4])
+        if time < since or not visit:
+            continue
+        if code and (code in internal or code.startswith(INTERNAL_PREFIX)):
+            skip.add(visit)
+        v = visits.setdefault(visit, {"steps": set(), "device": entry[5].strip(), "source": entry[6].strip(), "first": time})
+        v["steps"].add(label)
+    return {"visits": {k: v for k, v in visits.items() if k not in skip}}
 
 
 def admin_snapshot():

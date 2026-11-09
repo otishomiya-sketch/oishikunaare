@@ -3,6 +3,7 @@ import html
 import io
 import re
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlencode
@@ -383,13 +384,15 @@ _save_photos = components.declare_component(
 
 
 def save_button(photos, label, key, secondary=False, mime="image/jpeg"):
-    _save_photos(
+    tapped = _save_photos(
         files=[{"name": name, "data": base64.b64encode(data).decode(), "type": mime} for name, data in photos],
         label=label,
         secondary=secondary,
         key=key,
         default=None,
     )
+    if tapped:
+        track("save", "動画" if mime.startswith("video/") else f"{len(photos)}枚")
 
 
 def compare_slider(before, after, width, height, key):
@@ -502,6 +505,45 @@ def opened_in_line():
     return bool(re.search(r"\bLine/\d", user_agent))
 
 
+# ---- Where visitors stop ----
+# Each step a visit reaches is written once to the 行動ログ sheet (see
+# demo_quota.FUNNEL); the admin page shows how many visits got how far.
+
+
+def device_name():
+    try:
+        user_agent = st.context.headers.get("User-Agent", "")
+    except Exception:
+        return ""
+    kind = "Android" if "Android" in user_agent else ("iPhone" if re.search(r"iPhone|iPad|iPod", user_agent) else "PC")
+    return kind + ("（LINE内）" if re.search(r"\bLine/\d", user_agent) else "")
+
+
+def visit_source():
+    if st.session_state.get("outreach_ref"):
+        return "営業メッセージ"
+    return {"flyer": "チラシ"}.get(st.session_state.get("signup_source"), st.session_state.get("signup_source") or "")
+
+
+def track(event, detail="", step_code=None):
+    """Note a step once per visit; a failure here never affects the store."""
+    reached = st.session_state.setdefault("tracked_steps", set())
+    if event in reached:
+        return
+    reached.add(event)
+    visit = st.session_state.setdefault("visit_id", uuid.uuid4().hex[:10])
+    try:
+        demo_quota.log_event(
+            visit,
+            step_code if step_code is not None else st.session_state.get("visit_code", ""),
+            event, detail, device_name(), visit_source(),
+        )
+    except Exception:
+        pass
+
+
+track("open", st.query_params.get("code", "") and "コード付きのリンク")
+
 # LINE's in-app browser often cannot pick photos or save files (especially on
 # Android). `openExternalBrowser=1` is LINE's own switch to open a link in the
 # phone's regular browser instead.
@@ -546,6 +588,7 @@ def finished_screen(title, body):
 
 
 def start_screen(message=None):
+    track("start_screen", "コードが見つからない" if message else "")
     try:
         demo_closed = demo_quota.total_remaining() == 0
     except demo_quota.QuotaError as exc:
@@ -572,6 +615,7 @@ def start_screen(message=None):
         name = st.text_input("お店の名前", max_chars=40, placeholder="例：カレーの店 たなか")
         if st.form_submit_button("デモを始める", type="primary", width="stretch"):
             if not name.strip():
+                track("register_empty")
                 st.error("お店の名前を入れてください。")
             else:
                 try:
@@ -580,6 +624,7 @@ def start_screen(message=None):
                     st.error(f"{exc} 時間をおいてもう一度お試しください。")
                     st.stop()
                 report_outreach("trial", new_code, name.strip())
+                track("register", step_code=new_code)
                 st.session_state["save_code"] = new_code
                 st.query_params["code"] = new_code
                 st.rerun()
@@ -588,6 +633,7 @@ def start_screen(message=None):
         with st.form("code_form"):
             entered = st.text_input("デモコード", placeholder="例：demo-abc123")
             if st.form_submit_button("このコードで始める", width="stretch") and entered.strip():
+                track("code_entered", step_code=entered.strip()[:40])
                 st.session_state["save_code"] = entered.strip()
                 st.query_params["code"] = entered.strip()
                 st.rerun()
@@ -607,6 +653,8 @@ except demo_quota.QuotaError as exc:
 
 if not account:
     start_screen("このデモコードは見つかりませんでした。お店の名前を入れて、新しく始めてください。")
+
+st.session_state["visit_code"] = code
 
 # Keep this store's code in the URL and the browser from now on.
 if remembered != code:
@@ -652,6 +700,7 @@ def plan_panel(current=None):
                 if current["key"] == p["key"]:
                     st.markdown('<div class="mpp-note">ご利用中のプランです</div>', unsafe_allow_html=True)
             elif st.button("このプランで申し込む", key=f"plan_{p['key']}", width="stretch", type="primary"):
+                track("checkout", p["name"])
                 try:
                     _, url = billing.create_checkout(code, p, APP_URL)
                 except billing.BillingError as exc:
@@ -692,6 +741,7 @@ def plan_buttons(prefix):
     for i, p in enumerate(billing.PLANS):
         label = f"{p['name']}　月{p['quota']}枚　月額{p['price']:,}円（税込{billing.price_with_tax(p):,}円）"
         if st.button(label, key=f"{prefix}_{p['key']}", width="stretch", type="primary" if i == 0 else "secondary"):
+            track("checkout", p["name"])
             try:
                 _, url = billing.create_checkout(code, p, APP_URL)
             except billing.BillingError as exc:
@@ -734,6 +784,7 @@ if billing.enabled():
                 info = billing.subscription_plan(sub_id)
                 demo_quota.link_subscription(code, sub_id, customer_id, info["plan"]["name"] if info["plan"] else "")
                 report_outreach("paid", code)
+                track("paid", info["plan"]["name"] if info["plan"] else "")
                 st.session_state["flash"] = "お申し込みありがとうございます。有料プランが始まりました。"
                 st.session_state.pop("checkout", None)
                 account = demo_quota.get_account(code)
@@ -797,6 +848,7 @@ if upsell and 0 < remaining <= 3 and not st.session_state.get("results"):
         unsafe_allow_html=True,
     )
     if st.button(f"{light['name']}プランで続ける", key="upsell_low_light"):
+        track("checkout", light["name"])
         try:
             _, url = billing.create_checkout(code, light, APP_URL)
         except billing.BillingError as exc:
@@ -810,6 +862,7 @@ for message in st.session_state.get("errors", []):
     st.error(message)
 
 if remaining == 0 and not results:
+    track("quota_empty", "有料" if plan else "デモ")
     if plan:
         st.markdown(
             '<div class="mpp-done"><strong>今月の枚数を使い切りました</strong>'
@@ -839,6 +892,8 @@ if remaining == 0 and not results:
 upload_key = f"uploads_{st.session_state.get('batch', 0)}"
 
 step_bar(3 if results else (2 if st.session_state.get(upload_key) else 1))
+if not results:
+    track("upload_screen", f"{'有料' if plan else 'デモ'}・残り{remaining}枚")
 
 # Once photos are finished, show only the results so nothing is re-run by accident.
 # No `type` filter: an extension list stops Android from opening the photo
@@ -868,6 +923,7 @@ if uploads:
     uploads = [u for u, _ in previews]
 
 if uploads:
+    track("select", f"{len(uploads)}枚")
     st.markdown(
         f'<div class="mpp-section">選んだ写真　{len(uploads)}枚</div>',
         unsafe_allow_html=True,
@@ -903,6 +959,7 @@ if uploads:
         width="stretch",
         key="run",
     ):
+        track("process", f"{count}枚・{QUALITY_LABELS.get(quality, quality)}")
         # Count the photos against the store's limit before spending anything.
         try:
             granted = demo_quota.reserve(code, count, monthly_quota=plan["quota"] if plan else None)
@@ -974,6 +1031,9 @@ if uploads:
         st.session_state["results"] = [r for r in processed if r]
         st.session_state["errors"] = errors
 
+        if errors:
+            track("error", f"{len(errors)}枚")
+
         # One history row per batch, for the admin page.
         demo_quota.log_usage(code, bool(plan), len(st.session_state["results"]))
 
@@ -989,6 +1049,7 @@ if uploads:
         st.rerun()
 
 if results:
+    track("done", f"{len(results)}枚")
     st.button("← 最初に戻る", key="restart_top", on_click=start_over)
 
     st.markdown(
@@ -1064,6 +1125,7 @@ if results:
                                 r["video"] = make_image_video(
                                     r["full"], caption, credit, style=VIDEO_STYLES[video_style][0]
                                 )
+                            track("video", video_style)
                         except Exception as exc:
                             st.error(f"動画を作れませんでした。もう一度お試しください。（詳細：{exc}）")
                 if r.get("video"):

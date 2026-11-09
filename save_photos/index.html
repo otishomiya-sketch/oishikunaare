@@ -73,6 +73,12 @@
     }
   }
 
+  let taps = 0;
+  function reportTap() {
+    // Tells the app the button was used (for the admin page's step counts).
+    send("streamlit:setComponentValue", { value: ++taps, dataType: "json" });
+  }
+
   button.addEventListener("click", async () => {
     // Files are prepared at render time so the share call keeps the tap's user activation.
     if (isIOS && navigator.canShare && navigator.canShare({ files: files })) {
@@ -84,9 +90,11 @@
         if (e && e.name === "AbortError") return;
         download();
       }
+      reportTap();
       return;
     }
     download();
+    reportTap();
   });
 
   window.addEventListener("message", (event) => {
