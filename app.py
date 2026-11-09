@@ -2,6 +2,7 @@ import base64
 import html
 import io
 import re
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -494,6 +495,34 @@ def report_outreach(event, demo_code, store_name=None):
         )
     except requests.RequestException:
         pass
+
+
+def _post_visit(ref, token):
+    try:
+        requests.post(
+            OUTREACH_TRACK_URL,
+            json={"ref": ref, "event": "visit"},
+            headers={"X-Track-Token": token} if token else {},
+            timeout=3,
+        )
+    except requests.RequestException:
+        pass
+
+
+# Tell the outreach app once per visit that a sales link was opened, so it can
+# see whether messages are read at all. Sent in the background so the page
+# never waits for it.
+if (
+    OUTREACH_TRACK_URL
+    and st.session_state.get("outreach_ref")
+    and not st.session_state.get("outreach_visit_sent")
+):
+    st.session_state["outreach_visit_sent"] = True
+    threading.Thread(
+        target=_post_visit,
+        args=(st.session_state["outreach_ref"], str(st.secrets.get("OUTREACH_TRACK_TOKEN", "")).strip()),
+        daemon=True,
+    ).start()
 
 
 def opened_in_line():
